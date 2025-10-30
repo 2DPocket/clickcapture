@@ -73,7 +73,7 @@ impl CapturingOverLay {
             let transparent_color = Color { Argb: 0x00000000 }; // Alpha=0
             let status = GdipCreateSolidFill(transparent_color.Argb, &mut overlay.transparent_brush);
             if status != Status(0) {
-                println!("❌ GdipCreateSolidFill for transparent_brush failed with status {:?}", status);
+                eprintln!("❌ GdipCreateSolidFill for transparent_brush failed with status {:?}", status);
             }
         }
 
@@ -88,13 +88,13 @@ impl CapturingOverLay {
                 &mut font_family);
 
             if status != Status(0) {
-                println!("❌ GdipCreateFontFamilyFromName failed in CapturingOverLay::new() with status: {:?}", status);
+                eprintln!("❌ GdipCreateFontFamilyFromName failed in CapturingOverLay::new() with status: {:?}", status);
             }
 
             // フォントサイズ13でフォント作成
             let status =GdipCreateFont( font_family, 16.0, Default::default(), Default::default(),  &mut overlay.font);
             if status != Status(0) {
-                println!("❌ GdipCreateFont failed in CapturingOverLay::new() with status: {:?}", status);
+                eprintln!("❌ GdipCreateFont failed in CapturingOverLay::new() with status: {:?}", status);
             }
             // フォントファミリーの削除
             GdipDeleteFontFamily(font_family);
@@ -105,19 +105,19 @@ impl CapturingOverLay {
             let orange_color = Color { Argb: 0xFFDEB887 }; // 不透明 (burlywood)            
             let status = GdipCreateSolidFill(orange_color.Argb, &mut overlay.back_orange_brush);
             if status != Status(0) {
-                println!("❌ GdipCreateSolidFill for orange background failed in CapturingOverLay::new() with status: {:?}", status);
+                eprintln!("❌ GdipCreateSolidFill for orange background failed in CapturingOverLay::new() with status: {:?}", status);
             }
 
             // ラベル文字用の黒ブラシ作成
             let black_color = Color { Argb: 0xFF000000 }; // 不透明な黒
             let status = GdipCreateSolidFill(black_color.Argb, &mut overlay.back_ground_brush);
             if status != Status(0) {
-                println!("❌ GdipCreateSolidFill for black background failed in CapturingOverLay::new() with status: {:?}", status);
+                eprintln!("❌ GdipCreateSolidFill for black background failed in CapturingOverLay::new() with status: {:?}", status);
             }
 
             let status = GdipCreateStringFormat(0, 0, &mut overlay.string_format);
             if status != Status(0) {
-                println!("❌ GdipCreateStringFormat failed in CapturingOverLay::new() with status: {:?}", status);
+                eprintln!("❌ GdipCreateStringFormat failed in CapturingOverLay::new() with status: {:?}", status);
             }
         }
 
@@ -125,13 +125,13 @@ impl CapturingOverLay {
         if let Ok(bitmap) = load_png_from_resource(PCWSTR(IDP_CAPTURE_WAITING as usize as *const u16)) {
             overlay.wait_bitmap = bitmap;
         } else {
-            println!("❌ Failed to load PNG resource: IDP_CAPTURE_WAITING");
+            eprintln!("❌ Failed to load PNG resource: IDP_CAPTURE_WAITING");
         }
 
         if let Ok(bitmap) = load_png_from_resource(PCWSTR(IDP_CAPTURE_PROCESSING as usize as *const u16)) {
             overlay.processing_bitmap = bitmap;
         } else {
-            println!("❌ Failed to load PNG resource: IDP_CAPTURE_PROCESSING");
+            eprintln!("❌ Failed to load PNG resource: IDP_CAPTURE_PROCESSING");
         }
 
         overlay

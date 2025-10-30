@@ -91,7 +91,7 @@ pub fn install_mouse_hook() {
             app_state.mouse_hook = Some(SafeHHOOK(hook)); // AppState構造体にフックハンドルを保存
             println!("マウスフックを開始しました");
         } else {
-            println!("❌ マウスフックの開始に失敗しました");
+            eprintln!("❌ マウスフックの開始に失敗しました");
         }
     }
 }

@@ -169,8 +169,8 @@ pub fn app_log(message: &str) {
     
     // 【出力2】UIテキストボックスへの表示（ユーザー向け）
     unsafe {
-        // AppStateから有効なダイアログハンドルを取得
         let app_state = AppState::get_app_state_ref();
+
         if let Some(dialog_hwnd) = app_state.dialog_hwnd {
             // ログ表示用テキストボックスコントロールを取得
             if let Ok(log_edit) = GetDlgItem(Some(*dialog_hwnd), IDC_LOG_EDIT) {
@@ -184,6 +184,9 @@ pub fn app_log(message: &str) {
                 let _ = InvalidateRect(Some(log_edit), None, true);  // コントロールを無効化
                 let _ = UpdateWindow(log_edit);               // 即座に再描画を実行
             }
+        } else {
+            // ダイアログハンドルが無効な場合はデフォルト
+            eprintln!("❌ メッセージボックス表示エラー: ダイアログハンドルが無効です。");
         }
     }
 }
@@ -236,10 +239,8 @@ pub fn show_message_box(message_text: &str, title_text: &str, style: MESSAGEBOX_
             )
         } else {
             // ダイアログハンドルが無効な場合はデフォルト
-            eprintln!("❌ app_state.dialog_hwndが無効です。");
+            eprintln!("❌ メッセージボックス表示エラー: ダイアログハンドルが無効です。");
             MESSAGEBOX_RESULT(0)
         }
     }
 }
-
-

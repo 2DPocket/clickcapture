@@ -368,7 +368,8 @@ impl AppState {
             SetWindowLongPtrW(hwnd, GWLP_USERDATA, app_state_ptr as isize);
         }
 
-        DIALOG_HWND.set(SafeHWND(hwnd)).unwrap();
+        DIALOG_HWND.set(SafeHWND(hwnd))
+            .expect("グローバルダイアログハンドルの設定に失敗しました。");
 
         println!("アプリケーション状態が初期化されました");
     }

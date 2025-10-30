@@ -124,7 +124,7 @@ pub fn install_keyboard_hook() {
             app_state.keyboard_hook = Some(SafeHHOOK(hook));
             println!("キーボードフックを開始しました (エスケープキー監視)");
         } else {
-            println!("❌ キーボードフックの開始に失敗しました");
+            eprintln!("❌ キーボードフックの開始に失敗しました");
         }
     }
 }
