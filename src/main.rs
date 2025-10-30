@@ -354,7 +354,6 @@ unsafe extern "system" fn dialog_proc(
             AppState::init_app_state(hwnd);
 
             let app_state = AppState::get_app_state_mut();
-            app_state.dialog_hwnd = Some(SafeHWND(hwnd));
 
             // デフォルトフォルダーを設定（初回のみ）
             if app_state.selected_folder_path.is_none() {

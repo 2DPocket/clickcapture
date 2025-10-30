@@ -354,6 +354,9 @@ impl AppState {
 
         let mut app_state = AppState::default();
 
+        // メインダイアログハンドルを設定
+        app_state.dialog_hwnd = Some(SafeHWND(hwnd));
+
         // オーバーレイ構造体の初期化
         app_state.area_select_overlay = Some(AreaSelectOverLay::new());
         app_state.capturing_overlay = Some(CapturingOverLay::new());
