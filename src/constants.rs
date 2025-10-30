@@ -138,6 +138,7 @@ pub const WM_AUTO_CLICK_COMPLETE: u32 = 0x8000 + 1;
 
 1. ダイアログリソース読み込み：
 ```rust
+// main.rs の main() より
 let dialog_id = PCWSTR(IDD_DIALOG1 as *const u16);
 DialogBoxParamW(None, dialog_id, None, Some(dialog_proc), LPARAM(0));
 ```

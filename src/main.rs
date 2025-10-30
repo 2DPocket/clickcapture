@@ -278,7 +278,7 @@ fn main() {
         let _ = SetProcessDPIAware();
     }
 
-    // 1. GDI+ の初期化 (★ これが必要 ★)
+    // 1. GDI+ の初期化
     let mut gdiplus_token: usize = 0;
     let gdiplus_startup_input = GdiplusStartupInput {
         GdiplusVersion: 1,
