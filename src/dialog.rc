@@ -1,0 +1,99 @@
+// リソースID定義をインクルード
+#include "src/resource.h"
+
+// Windows リソース定数の定義
+#define DS_SETFONT 0x40L
+#define DS_MODALFRAME 0x80L
+#define WS_POPUP 0x80000000L
+#define WS_CAPTION 0x00C00000L
+#define WS_SYSMENU 0x00080000L
+#define WS_VISIBLE 0x10000000L
+#define WS_CHILD 0x40000000L
+#define WS_EX_LAYERED 0x00080000L
+#define WS_EX_TOPMOST 0x00000008L
+#define WS_EX_TOOLWINDOW 0x00000080L
+#define ES_AUTOHSCROLL 0x0080L
+#define ES_READONLY 0x0800L
+#define BS_PUSHBUTTON 0x00000000L
+#define BS_AUTOCHECKBOX 0x00000003L
+#define BS_OWNERDRAW 0x0000000BL
+#define SS_ICON 0x00000003L
+#define CBS_DROPDOWNLIST 0x0003L
+#define CBS_HASSTRINGS 0x0200L
+#define IDOK 1
+#define IDCANCEL 2
+#define BS_GROUPBOX 0x00000007L
+#define ES_NUMBER 0x2000L
+
+// アイコンリソース（EXEに埋め込み）
+IDI_CAMERA_OFF ICON "assets/images/camera_off.ico"
+IDI_CAMERA_ON ICON "assets/images/camera_on.ico"
+IDI_SELECT_AREA_OFF ICON "assets/images/select_area_off.ico"
+IDI_SELECT_AREA_ON ICON "assets/images/select_area_on.ico"
+IDI_SELECT_FOLDER ICON "assets/images/select_folder.ico"
+IDI_EXPORT_PDF ICON "assets/images/export_pdf.ico"
+IDI_CLOSE ICON "assets/images/close.ico"
+
+// キャプチャオーバーレイ用画像リソース
+IDP_CAPTURE_PROCESSING RCDATA "assets/images/capture_processing.png"
+IDP_CAPTURE_WAITING RCDATA "assets/images/capture_waiting.png"
+
+// アプリケーションアイコンを追加
+IDI_APP_ICON ICON "assets/images/clickcapture.ico"
+
+// メインアプリケーションアイコン（EXEファイルのアイコン）
+MAINICON ICON "assets/images/clickcapture.ico"
+
+// 日本語コードページとUnicodeサポート
+#pragma code_page(65001)  // UTF-8
+
+// =============================================================
+// メインダイアログレイアウト定義 (320x130ピクセル)
+// =============================================================
+//
+// 【ユーザビリティ設計】
+// - 直感的な縦配置フロー（上から下への操作順序）
+// - コンボボックスによる選択式設定（入力ミス防止）
+// - アイコンボタン（視覚的分かりやすさ）
+// =============================================================
+ 
+IDD_DIALOG1 DIALOGEX 0, 0, 346, 125
+STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "クリック画面キャプチャツール"
+FONT 9, "MS UI Gothic", 400, 0, 128
+BEGIN
+    // ===== Row1: 保存先選択エリア =====
+    LTEXT           "選択されたディレクトリ:", -1, 10, 10, 100, 8
+    EDITTEXT        IDC_PATH_EDIT, 10, 25, 220, 14, ES_AUTOHSCROLL | ES_READONLY
+    PUSHBUTTON      "", IDC_BROWSE_BUTTON, 240, 25, 16, 16, BS_PUSHBUTTON | BS_OWNERDRAW         // フォルダー参照
+    
+    PUSHBUTTON      "", IDC_AREA_SELECT_BUTTON, 258, 25, 16, 16, BS_PUSHBUTTON | BS_OWNERDRAW    // エリア選択
+    PUSHBUTTON      "", IDC_CAPTURE_START_BUTTON, 276, 25, 16, 16, BS_PUSHBUTTON | BS_OWNERDRAW  // キャプチャ開始
+
+    PUSHBUTTON      "", IDC_EXPORT_PDF_BUTTON, 298, 25, 16, 16, BS_PUSHBUTTON | BS_OWNERDRAW    // PDF一括変換
+
+    PUSHBUTTON      "", IDC_CLOSE_BUTTON, 320, 25, 16, 16, BS_PUSHBUTTON | BS_OWNERDRAW          // アプリ終了
+
+    // ===== Row2: 品質設定エリア（3つのコンボボックス） =====
+    LTEXT           "画像サイズ調整", -1, 10, 50, 60, 8
+    COMBOBOX        IDC_SCALE_COMBO, 60, 48, 50, 100, CBS_DROPDOWNLIST | CBS_HASSTRINGS        
+
+    LTEXT           "JPEG品質", -1, 120, 50, 60, 8
+    COMBOBOX        IDC_QUALITY_COMBO, 155, 48, 50, 100, CBS_DROPDOWNLIST | CBS_HASSTRINGS     
+
+    LTEXT           "PDFサイズ上限", -1, 220, 50, 60, 8
+    COMBOBOX        IDC_PDF_SIZE_COMBO, 270, 48, 50, 100, CBS_DROPDOWNLIST | CBS_HASSTRINGS     
+
+    CONTROL "自動クリック設定", -1, "Button", BS_GROUPBOX, 8, 66, 240, 30
+    CONTROL "自動クリック", IDC_AUTO_CLICK_CHECKBOX, "Button", BS_AUTOCHECKBOX, 13, 75, 45, 18 
+
+    LTEXT           "間隔（秒）", -1, 68, 81, 60, 8
+    COMBOBOX        IDC_AUTO_CLICK_INTERVAL_COMBO, 100, 79, 30, 50, CBS_DROPDOWNLIST | CBS_HASSTRINGS  
+
+    LTEXT           "回数", -1, 140, 81, 60, 8
+    EDITTEXT        IDC_AUTO_CLICK_COUNT_EDIT, 160, 78, 16, 14, ES_NUMBER
+
+    // ===== Row3: ログ表示エリア =====
+    EDITTEXT        IDC_LOG_EDIT, 8, 105, 328, 14, ES_AUTOHSCROLL | ES_READONLY    
+
+END
