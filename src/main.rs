@@ -903,19 +903,19 @@ PDFサイズコンボボックス・イベント処理
 ============================================================================
 */
 
-/// PDFサイズコンボボックスを初期化（500MB〜1000MB、100MB刻み）
+/// PDFサイズコンボボックスを初期化（100MB〜500MB、100MB刻み）
 /// 
 /// # 引数
 /// * `hwnd` - ダイアログウィンドウハンドル
 /// 
 /// # 機能
-/// 1. コンボボックスに選択肢（500, 600, 700, 800, 900, 1000）を追加
-/// 2. デフォルト値（500MB）を選択状態に設定
+/// 1. コンボボックスに選択肢（20, 40, 60, 80, 100）を追加
+/// 2. デフォルト値（20MB）を選択状態に設定
 /// 3. AppStateのpdf_max_size_mbと同期
 fn initialize_pdf_size_combo(hwnd: HWND) {
     if let Ok(combo_hwnd) = unsafe { GetDlgItem(Some(hwnd), IDC_PDF_SIZE_COMBO) } {
-        // 500MBから1000MBまで100MB刻みで項目を追加
-        for size_mb in (500..=1000).step_by(100) {
+        // 100MBから500MBまで100MB刻みで項目を追加
+        for size_mb in (20..=100).step_by(20) {
             let text = format!("{}MB", size_mb);
             let mut wide_text: Vec<u16> = text.encode_utf16().collect();
             wide_text.push(0); // null終端文字を追加
@@ -923,9 +923,9 @@ fn initialize_pdf_size_combo(hwnd: HWND) {
                 let _ = SendMessageW(combo_hwnd, CB_ADDSTRING, Some(WPARAM(0)), Some(LPARAM(wide_text.as_ptr() as isize)));
             }
         }
-        
-        // デフォルト値（500MB）を選択
-        // 500MBは最初の項目（インデックス0）
+
+        // デフォルト値（20MB）を選択
+        // 20MBは最初の項目（インデックス0）
         unsafe {
             let _ = SendMessageW(combo_hwnd, CB_SETCURSEL, Some(WPARAM(0)), Some(LPARAM(0)));
         }
