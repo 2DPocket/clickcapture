@@ -159,7 +159,8 @@ fn auto_click_loop(stop_flag: Arc<AtomicBool>, interval_ms: u64, progress_count_
     while !stop_flag.load(Ordering::Relaxed) {
 
         // オーバーレイを最新状態に更新
-        app_state.capturing_overlay.as_ref().unwrap().refresh_overlay();
+        let overlay = app_state.capturing_overlay.as_ref().expect("キャプチャーオーバーレイが存在しません。");
+        overlay.refresh_overlay();
 
         // 指定間隔で待機（停止チェック付き）
         // 100ms毎に停止フラグを確認しながらスリープ

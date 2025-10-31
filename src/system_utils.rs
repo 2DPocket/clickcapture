@@ -92,7 +92,7 @@ pub fn set_application_icon() {
     unsafe {
         // AppStateから有効なダイアログハンドルを取得
         let app_state = AppState::get_app_state_ref();
-        let dialog_hwnd = app_state.dialog_hwnd.unwrap(); // パニック時は設計エラー
+        let dialog_hwnd = app_state.dialog_hwnd.expect("ダイアログハンドルが無効です。");
 
         // 現在のモジュール（実行ファイル）のハンドルを取得
         let hinstance = GetModuleHandleW(None).unwrap_or_default();

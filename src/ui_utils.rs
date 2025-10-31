@@ -155,7 +155,8 @@ pub fn load_png_from_resource(resource_id: PCWSTR) -> Result<*mut GpBitmap, Stri
 
         // 6. IStreamからGDI+ビットマップを作成 (同じ)
         let mut bitmap: *mut GpBitmap = std::ptr::null_mut();
-        let status = GdipCreateBitmapFromStream(stream.as_ref().unwrap(), &mut bitmap);
+        let stream_ref = stream.as_ref().expect("IStream is None");
+        let status = GdipCreateBitmapFromStream(stream_ref, &mut bitmap);
 
         if status != Status(0) {
             return Err(format!("GdipCreateBitmapFromStream failed with status {:?}", status));

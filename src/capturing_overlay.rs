@@ -227,7 +227,8 @@ impl Overlay for CapturingOverLay {
 
 fn overlay_window_paint(_hwnd: HWND, graphics: *mut GpGraphics) {
     let app_state = AppState::get_app_state_ref();
-    let overlay = app_state.capturing_overlay.as_ref().unwrap();
+    let overlay = app_state.capturing_overlay.as_ref()
+        .expect("キャプチャーオーバーレイが存在しません。");
 
     unsafe {
         // 背景を透明でクリア (GDI+で透明な背景を確保)
@@ -267,8 +268,9 @@ fn draw_auto_click_processing_label(graphics: *mut GpGraphics) {
     const LABEL_OFFSET_X: i32 = 50;
 
     let app_state = AppState::get_app_state_ref();
-    let overlay = app_state.capturing_overlay.as_ref().unwrap();
-
+    let overlay = app_state.capturing_overlay.as_ref()
+        .expect("キャプチャーオーバーレイが存在しません。");
+    
     let text = format!("自動クリック中 ...({}/{})", 
         app_state.auto_clicker.get_progress_count(),
         app_state.auto_clicker.get_max_count(),

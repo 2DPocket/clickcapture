@@ -221,7 +221,9 @@ pub fn export_selected_folder_to_pdf() -> Result<(), Box<dyn std::error::Error>>
 
     for entry in entries {
         let path = entry.path();
-        let filename = path.file_name().unwrap().to_string_lossy().to_string();
+        let filename = path.file_name()
+            .expect("ファイル名の取得に失敗しました")
+            .to_string_lossy().to_string();
         
         total_processed += 1;
         app_log(&format!("⏳ 処理中のJPEG: {} ({}/{})", filename, total_processed, total_files));

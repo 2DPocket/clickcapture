@@ -164,7 +164,8 @@ fn overlay_window_paint(_hwnd: HWND, graphics: *mut GpGraphics) {
         app_state.screen_height,
     );
 
-    let overlay = app_state.area_select_overlay.as_ref().unwrap();
+    let overlay = app_state.area_select_overlay.as_ref()
+        .expect("エリア選択オーバーレイが存在しません。");
 
     // 背景を半透明の黒で塗りつぶす
     unsafe {

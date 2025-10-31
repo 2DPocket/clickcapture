@@ -392,7 +392,7 @@ impl AppState {
     //
     // 安全性：AppState生存期間はアプリケーション全体と同じ
     pub fn get_app_state_ref() -> &'static AppState {
-        let hwnd = DIALOG_HWND.get().unwrap();
+        let hwnd = DIALOG_HWND.get().expect("グローバルダイアログハンドルの取得に失敗しました。");
         unsafe {
             let ptr = GetWindowLongPtrW(**hwnd, GWLP_USERDATA) as *const AppState;
             &*ptr
@@ -419,7 +419,7 @@ impl AppState {
     // 注意：
     //   同時に複数の可変参照を作成しないよう呼び出し側で制御必要
     pub fn get_app_state_mut() -> &'static mut AppState {
-        let hwnd = DIALOG_HWND.get().unwrap();
+        let hwnd = DIALOG_HWND.get().expect("グローバルダイアログハンドルの取得に失敗しました。");
         
         unsafe {
             let ptr = GetWindowLongPtrW(**hwnd, GWLP_USERDATA) as *mut AppState;

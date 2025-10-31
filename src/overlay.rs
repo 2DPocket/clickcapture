@@ -516,7 +516,7 @@ fn paint_by_update_layered_window(hwnd: HWND, hdc: HDC, paint: &fn (hwnd: HWND, 
             &mut bits,
             None,
             0,
-        ).unwrap();
+        ).expect("DIBセクションの作成に失敗しました");
         
         old_bmp = SelectObject(mem_dc, mem_bmp.into());
     }
@@ -526,13 +526,13 @@ fn paint_by_update_layered_window(hwnd: HWND, hdc: HDC, paint: &fn (hwnd: HWND, 
     unsafe { 
         let status = GdipCreateFromHDC(mem_dc, &mut graphics);
         if status != Status(0) { // Status(0) は Ok
-            println!("★ Error: GdipCreateFromHDC failed with status {:?}", status);
+            eprintln!("❌ Error: GdipCreateFromHDC failed with status {:?}", status);
             return; // Graphicsオブジェクトが作成できないと後続処理は不可能
         }
 
         let status = GdipSetSmoothingMode(graphics, SmoothingModeAntiAlias);
         if status != Status(0) {
-            println!("★ Warning: GdipSetSmoothingMode failed with status {:?}", status);
+            eprintln!("❌ Warning: GdipSetSmoothingMode failed with status {:?}", status);
         }
     };
 
