@@ -427,7 +427,7 @@ unsafe extern "system" fn dialog_proc(
                 IDC_CLOSE_BUTTON => {
                     // 1007 - 閉じるボタン
                     // ダイアログを終了
-                    let _ = unsafe { EndDialog(hwnd, 0) };
+                    cleanup_and_exit_dialog(hwnd);
                     return 1;
                 }
                 IDC_SCALE_COMBO => {
@@ -491,7 +491,7 @@ unsafe extern "system" fn dialog_proc(
 
         WM_CLOSE => {
             // ウィンドウの閉じるボタンが押された場合
-            cleanup_and_exit_dialog();
+            cleanup_and_exit_dialog(hwnd);
             return 1;
         }
         WM_DESTROY => {
@@ -589,7 +589,7 @@ fn init_path_edit_control(hwnd: HWND) {
 }
 
 // 終了処理を統一する共通関数
-fn cleanup_and_exit_dialog() {
+fn cleanup_and_exit_dialog(hwnd: HWND) {
     app_log("ダイアログを終了しています...");
 
     // 状態のクリーンアップ
@@ -602,6 +602,9 @@ fn cleanup_and_exit_dialog() {
         // エリア選択モード中なら終了
         cancel_area_select_mode();
     }
+
+    let _ = unsafe { EndDialog(hwnd, 0) };
+
 }
 
 // ===== アイコンボタン制御関数 =====
