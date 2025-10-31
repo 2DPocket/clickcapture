@@ -34,7 +34,7 @@ use crate::ui_utils::*;
 
 
 // オーバーレイウィンドウのサイズ
-const WIN_SIZE: (i32, i32) = (250, 90); // 150x100ピクセル
+const WIN_SIZE: (i32, i32) = (230, 90); // 230x90ピクセル
 
 // アイコンの描画サイズ (constants.rsで定義しても良い)
 const ICON_DRAW_SIZE: i32 = 32; 
@@ -265,12 +265,12 @@ fn overlay_window_paint(_hwnd: HWND, graphics: *mut GpGraphics) {
 
 /// 連続クリック処理中ラベル描画ヘルパー関数
 fn draw_auto_click_processing_label(graphics: *mut GpGraphics) {
-    const LABEL_OFFSET_X: i32 = 50;
+    const LABEL_OFFSET_X: i32 = 20;
 
     let app_state = AppState::get_app_state_ref();
     let overlay = app_state.capturing_overlay.as_ref()
         .expect("キャプチャーオーバーレイが存在しません。");
-    
+
     let text = format!("自動クリック中 ...({}/{})", 
         app_state.auto_clicker.get_progress_count(),
         app_state.auto_clicker.get_max_count(),
