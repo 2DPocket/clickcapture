@@ -45,14 +45,14 @@ impl AreaSelectOverLay {
             let semi_transparent_black_color = Color { Argb: 0x80000000 }; // Alpha=128
             let status = GdipCreateSolidFill(semi_transparent_black_color.Argb, &mut overlay.semi_transparent_black_brush);
             if status != Status(0) {
-                println!("❌ GdipCreateSolidFill for semi_transparent_black_brush failed with status {:?}", status);
+                eprintln!("❌ GdipCreateSolidFill for semi_transparent_black_brush failed with status {:?}", status);
             }
 
             // 透明ブラシ作成
             let transparent_color = Color { Argb: 0x00000000 }; // Alpha=0
             let status =GdipCreateSolidFill(transparent_color.Argb, &mut overlay.transparent_brush);
             if status != Status(0) {
-                println!("❌ GdipCreateSolidFill for transparent_brush failed with status {:?}", status);
+                eprintln!("❌ GdipCreateSolidFill for transparent_brush failed with status {:?}", status);
             }
 
 
@@ -60,21 +60,21 @@ impl AreaSelectOverLay {
             let red_color = Color { Argb: 0xFFFF0000 }; // Alpha
             let status = GdipCreatePen1(red_color.Argb, 2.0, UnitPixel, &mut overlay.red_pen);
             if status != Status(0) {
-                println!("❌ GdipCreatePen1 for red_pen failed with status {:?}", status);
+                eprintln!("❌ GdipCreatePen1 for red_pen failed with status {:?}", status);
             }
 
             // リサイズハンドル用ブラシ作成（薄い赤）
             let handle_fill_color = Color { Argb: 0x80FF0000 }; // Alpha=128
             let status = GdipCreateSolidFill(handle_fill_color.Argb, &mut overlay.resize_handles_brush);
             if status != Status(0) {
-                println!("❌ GdipCreateSolidFill for resize_handles_brush failed with status {:?}", status);
+                eprintln!("❌ GdipCreateSolidFill for resize_handles_brush failed with status {:?}", status);
             }
 
             // リサイズハンドル用ペン作成（不透明な赤）
             let handle_border_color = Color { Argb: 0xFFFF0000 }; // Alpha=255
             let status = GdipCreatePen1(handle_border_color.Argb, 1.0, UnitPixel, &mut overlay.resize_handles_pen);
             if status != Status(0) {
-                println!("❌ GdipCreatePen1 for resize_handles_pen failed with status {:?}", status);
+                eprintln!("❌ GdipCreatePen1 for resize_handles_pen failed with status {:?}", status);
             }
 
         }
