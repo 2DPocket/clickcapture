@@ -786,20 +786,19 @@ fn initialize_scale_combo(hwnd: HWND) {
         // 55%から100%まで5%刻みで項目を追加
         let scales: Vec<u8> = (55..=100).step_by(5).collect();
         
-        for scale in scales.iter().rev() {
-            let text = format!("{}%", scale);
-            let mut wide_text: Vec<u16> = text.encode_utf16().collect();
-            wide_text.push(0); // null終端文字を追加
-            unsafe {
-                let _ = SendMessageW(combo_hwnd, CB_ADDSTRING, Some(WPARAM(0)), Some(LPARAM(wide_text.as_ptr() as isize)));
-            }
+        for &scale in scales.iter().rev() {
+            let text = format!("{}%\0", scale);
+            let wide_text: Vec<u16> = text.encode_utf16().collect();
+            let index = unsafe { SendMessageW(combo_hwnd, CB_ADDSTRING, Some(WPARAM(0)), Some(LPARAM(wide_text.as_ptr() as isize))) }.0 as usize;
+            // 各項目に実際のスケール値をデータとして設定
+            unsafe { SendMessageW(combo_hwnd, CB_SETITEMDATA, Some(WPARAM(index)), Some(LPARAM(scale as isize))); }
         }
         
         // デフォルト値（65%）を選択
         // 65%は (100-65)/5 = 7番目のインデックス（0ベース）
         let default_index = (100 - 65) / 5;
         unsafe {
-            let _ = SendMessageW(combo_hwnd, CB_SETCURSEL, Some(WPARAM(default_index as usize)), Some(LPARAM(0)));
+            SendMessageW(combo_hwnd, CB_SETCURSEL, Some(WPARAM(default_index as usize)), Some(LPARAM(0)));
         }
     }
 }
@@ -819,8 +818,8 @@ fn handle_scale_combo_change(hwnd: HWND) {
         let selected_index = unsafe { SendMessageW(combo_hwnd, CB_GETCURSEL, Some(WPARAM(0)), Some(LPARAM(0))).0 } as i32;
         
         if selected_index >= 0 {
-            // インデックスからスケール値を計算（0=100%, 1=95%, 2=90%, ..., 9=55%）
-            let scale_value = 100 - (selected_index * 5);
+            // 選択された項目のデータを直接取得
+            let scale_value = unsafe { SendMessageW(combo_hwnd, CB_GETITEMDATA, Some(WPARAM(selected_index as usize)), Some(LPARAM(0))) }.0 as u8;
             
             // AppStateに保存
             let app_state = AppState::get_app_state_mut();
@@ -850,19 +849,19 @@ fn initialize_quality_combo(hwnd: HWND) {
     if let Ok(combo_hwnd) = unsafe { GetDlgItem(Some(hwnd), IDC_QUALITY_COMBO) } {
         // 100%から70%まで5%刻みで項目を追加
         let qualities: Vec<u8> = (70..=100).step_by(5).collect();
-        for quality in qualities.iter().rev() {
+        for &quality in qualities.iter().rev() {
             let text = format!("{}%\0", quality);
             let wide_text: Vec<u16> = text.encode_utf16().collect();
-            unsafe {
-                let _ = SendMessageW(combo_hwnd, CB_ADDSTRING, Some(WPARAM(0)), Some(LPARAM(wide_text.as_ptr() as isize)));
-            }
+            let index = unsafe { SendMessageW(combo_hwnd, CB_ADDSTRING, Some(WPARAM(0)), Some(LPARAM(wide_text.as_ptr() as isize))) }.0 as usize;
+            // 各項目に実際の品質値をデータとして設定
+            unsafe { SendMessageW(combo_hwnd, CB_SETITEMDATA, Some(WPARAM(index)), Some(LPARAM(quality as isize))); }
         }
         
         // デフォルト値（95%）を選択
         // 95%は (100-95)/5 = 1番目のインデックス（0ベース）
         let default_index = (100 - 95) / 5;
         unsafe {
-            let _ = SendMessageW(combo_hwnd, CB_SETCURSEL, Some(WPARAM(default_index as usize)), Some(LPARAM(0)));
+            SendMessageW(combo_hwnd, CB_SETCURSEL, Some(WPARAM(default_index as usize)), Some(LPARAM(0)));
         }
     }
 }
@@ -882,8 +881,8 @@ fn handle_quality_combo_change(hwnd: HWND) {
         let selected_index = unsafe { SendMessageW(combo_hwnd, CB_GETCURSEL, Some(WPARAM(0)), Some(LPARAM(0))).0 } as i32;
         
         if selected_index >= 0 {
-            // インデックスから品質値を計算（0=100%, 1=95%, 2=90%, ..., 6=70%）
-            let quality_value = 100 - (selected_index * 5);
+            // 選択された項目のデータを直接取得
+            let quality_value = unsafe { SendMessageW(combo_hwnd, CB_GETITEMDATA, Some(WPARAM(selected_index as usize)), Some(LPARAM(0))) }.0 as u8;
             
             // AppStateに保存
             let app_state = AppState::get_app_state_mut();
@@ -909,22 +908,30 @@ PDFサイズコンボボックス・イベント処理
 /// 1. コンボボックスに選択肢（20, 40, 60, 80, 100）を追加
 /// 2. デフォルト値（20MB）を選択状態に設定
 /// 3. AppStateのpdf_max_size_mbと同期
+const PDF_FILE_MIN_SIZE_MB: u16 = 20;
+const PDF_FILE_MAX_SIZE_MB: u16 = 100;
+const PDF_FILE_SIZE_STEP_MB: u16 = 20;
 fn initialize_pdf_size_combo(hwnd: HWND) {
     if let Ok(combo_hwnd) = unsafe { GetDlgItem(Some(hwnd), IDC_PDF_SIZE_COMBO) } {
-        // 100MBから500MBまで100MB刻みで項目を追加
-        for size_mb in (20..=100).step_by(20) {
-            let text = format!("{}MB", size_mb);
-            let mut wide_text: Vec<u16> = text.encode_utf16().collect();
-            wide_text.push(0); // null終端文字を追加
-            unsafe {
-                let _ = SendMessageW(combo_hwnd, CB_ADDSTRING, Some(WPARAM(0)), Some(LPARAM(wide_text.as_ptr() as isize)));
-            }
+        // 20MBから100MBまで20MB刻みで項目を追加
+        for &size_mb in (PDF_FILE_MIN_SIZE_MB..=PDF_FILE_MAX_SIZE_MB).step_by(PDF_FILE_SIZE_STEP_MB as usize).collect::<Vec<u16>>().iter() {
+            let text = format!("{}MB\0", size_mb);
+            let wide_text: Vec<u16> = text.encode_utf16().collect();
+            let index = unsafe { SendMessageW(combo_hwnd, CB_ADDSTRING, Some(WPARAM(0)), Some(LPARAM(wide_text.as_ptr() as isize))) }.0 as usize;
+            unsafe { SendMessageW(combo_hwnd, CB_SETITEMDATA, Some(WPARAM(index)), Some(LPARAM(size_mb as isize))); }
         }
+
+        // 無制限オプションを追加
+        let unlimited_text = "最大(1GB)\0";
+        let unlimited_wide: Vec<u16> = unlimited_text.encode_utf16().collect();
+        let index = unsafe { SendMessageW(combo_hwnd, CB_ADDSTRING, Some(WPARAM(0)), Some(LPARAM(unlimited_wide.as_ptr() as isize))) }.0 as usize;
+        // 1GBをMB単位で設定
+        unsafe { SendMessageW(combo_hwnd, CB_SETITEMDATA, Some(WPARAM(index)), Some(LPARAM(1024))); }
 
         // デフォルト値（20MB）を選択
         // 20MBは最初の項目（インデックス0）
         unsafe {
-            let _ = SendMessageW(combo_hwnd, CB_SETCURSEL, Some(WPARAM(0)), Some(LPARAM(0)));
+            SendMessageW(combo_hwnd, CB_SETCURSEL, Some(WPARAM(0)), Some(LPARAM(0)));
         }
     }
 }
@@ -936,7 +943,7 @@ fn initialize_pdf_size_combo(hwnd: HWND) {
 /// 
 /// # 機能
 /// 1. 現在選択されている項目のインデックスを取得
-/// 2. インデックスからサイズ値を計算（500, 600, 700, ..., 1000）
+/// 2. インデックスからサイズ値を計算（20MB刻み）
 /// 3. AppStateのpdf_max_size_mbを更新
 fn handle_pdf_size_combo_change(hwnd: HWND) {
     if let Ok(combo_hwnd) = unsafe { GetDlgItem(Some(hwnd), IDC_PDF_SIZE_COMBO) } {
@@ -944,8 +951,8 @@ fn handle_pdf_size_combo_change(hwnd: HWND) {
         let selected_index = unsafe { SendMessageW(combo_hwnd, CB_GETCURSEL, Some(WPARAM(0)), Some(LPARAM(0))).0 } as i32;
         
         if selected_index >= 0 {
-            // インデックスからサイズ値を計算（0=500MB, 1=600MB, 2=700MB, ..., 5=1000MB）
-            let size_value = 500 + (selected_index * 100);
+            // 選択された項目のデータを直接取得
+            let size_value = unsafe { SendMessageW(combo_hwnd, CB_GETITEMDATA, Some(WPARAM(selected_index as usize)), Some(LPARAM(0))) }.0 as u16;
             
             // AppStateに保存
             let app_state = AppState::get_app_state_mut();
@@ -1039,18 +1046,16 @@ fn update_auto_click_controls_state(hwnd: HWND) {
 fn initialize_auto_click_interval_combo(hwnd: HWND) {
     if let Ok(combo_hwnd) = unsafe { GetDlgItem(Some(hwnd), IDC_AUTO_CLICK_INTERVAL_COMBO) } {
         // 1秒から5秒まで1秒刻みで項目を追加
-        for interval_sec in 1..=5 {
-            let text = format!("{}秒", interval_sec);
-            let mut wide_text: Vec<u16> = text.encode_utf16().collect();
-            wide_text.push(0); // null終端文字を追加
-            unsafe {
-                let _ = SendMessageW(combo_hwnd, CB_ADDSTRING, Some(WPARAM(0)), Some(LPARAM(wide_text.as_ptr() as isize)));
-            }
+        for interval_sec in 1..=5u64 {
+            let text = format!("{}秒\0", interval_sec);
+            let wide_text: Vec<u16> = text.encode_utf16().collect();
+            let index = unsafe { SendMessageW(combo_hwnd, CB_ADDSTRING, Some(WPARAM(0)), Some(LPARAM(wide_text.as_ptr() as isize))) }.0 as usize;
+            unsafe { SendMessageW(combo_hwnd, CB_SETITEMDATA, Some(WPARAM(index)), Some(LPARAM((interval_sec * 1000) as isize))); }
         }
 
         // デフォルト値（1秒）を選択
         unsafe {    
-            let _ = SendMessageW(combo_hwnd, CB_SETCURSEL, Some(WPARAM(0)), Some(LPARAM(0)));
+            SendMessageW(combo_hwnd, CB_SETCURSEL, Some(WPARAM(0)), Some(LPARAM(0)));
         }
     }
 }
@@ -1062,8 +1067,8 @@ fn handle_auto_click_interval_combo_change(hwnd: HWND) {
         let selected_index = unsafe { SendMessageW(combo_hwnd, CB_GETCURSEL, Some(WPARAM(0)), Some(LPARAM(0))).0 } as i32;
         
         if selected_index >= 0 {
-            // インデックスからサイズ値を計算（0=500MB, 1=600MB, 2=700MB, ..., 5=1000MB）
-            let interval_value = ((selected_index + 1) * 1000) as u64; // ミリ秒単位
+            // 選択された項目のデータを直接取得
+            let interval_value = unsafe { SendMessageW(combo_hwnd, CB_GETITEMDATA, Some(WPARAM(selected_index as usize)), Some(LPARAM(0))) }.0 as u64;
             
             // AppStateに保存
             let app_state = AppState::get_app_state_mut();
