@@ -363,9 +363,6 @@ unsafe extern "system" fn dialog_proc(
             // アプリケーションアイコン設定
             set_application_icon(); 
 
-            // グローバルマウスフックを設定
-            install_mouse_hook();
-
             // アイコンボタンを初期化
             initialize_icon_button(hwnd);
 

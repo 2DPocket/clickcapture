@@ -5,41 +5,39 @@
 
 【ファイル概要】
 画面キャプチャ機能の中核モジュール。選択された領域の画面キャプチャ、
-JPEG画像保存、連番ファイル名生成、キャプチャモード制御を提供する。
+JPEG画像保存、連番ファイル名生成、キャプチャモード制御、自動クリック連携を提供する。
 
 【主要機能】
 1. キャプチャモード制御（toggle_capture_mode）
 2. キャプチャモードオーバーレイ管理（表示/非表示/更新）
-3. 画面領域キャプチャ（capture_selected_area）
+3. 画面領域キャプチャ（capture_screen_area_with_counter）
 4. JPEG画像保存（ユーザー設定品質70%〜100%で可変品質保存）
-5. 連番ファイル名生成（screenshot_001.jpg, 002.jpg...）
+5. 連番ファイル名生成（0001.jpg, 0002.jpg...）
 6. エラーハンドリング（領域未選択、保存失敗等）
+7. 自動連続クリック連携（指定回数・間隔での自動キャプチャ）
 
 【技術仕様】
 - 画面取得：GetDC + BitBlt による高速ピクセル取得
 - 画像処理：image crate による JPEG エンコード
-- ファイル保存：fs::write による安全な書き込み
+- ファイル保存：BufWriter による効率的な書き込み
 - 品質設定：JPEG ユーザー設定品質（70%〜100%）
 - スケール設定：ユーザー設定倍率（55%〜100%）
 - オーバーレイ：GDI+で描画される動的オーバーレイ
 - パフォーマンス：メモリ効率的な RGB バッファ処理
 
 【処理フロー】
-[キャプチャボタン] → toggle_capture_mode()
-                      ↓
-                 selected_area 存在確認
+[キャプチャボタン] → toggle_capture_mode() → エリア/自動クリック設定を検証
                       ↓ (モード開始)
-              capturing_overlay.show_overlay() → オーバーレイ表示開始
-                      ↓ (左クリック)
-              switch_capture_processing(true) → 処理中表示に更新
+              フック開始 + capturing_overlay.show_overlay()
                       ↓
-              capture_selected_area() → 画面データ取得
-                      ↓
-              JPEG変換（ユーザー設定品質） → ファイル保存
-                      ↓
-              switch_capture_icon(false) → 待機中表示復帰
-                      ↓
-              連番カウンタ更新 → 次回キャプチャ準備完了
+              [画面内左クリック]
+                      ├─ (自動クリック有効) → auto_clicker.start() → 指定回数ループ
+                      │      ↓ (ループ内)
+                      │   capture_screen_area_with_counter() → JPEG保存 → 連番更新
+                      │      ↓
+                      │   [ループ完了] → toggle_capture_mode() → モード終了
+                      │
+                      └─ (自動クリック無効) → capture_screen_area_with_counter() → JPEG保存 → 連番更新
 
 ============================================================================
 */
@@ -56,6 +54,7 @@ use image::{ImageBuffer, Rgb};
 // ファイルシステム操作
 use std::fs;
 
+use crate::mouse::{install_mouse_hook, uninstall_mouse_hook};
 // アプリケーション状態管理構造体
 use crate::{app_state::*, overlay::Overlay};
 
@@ -80,16 +79,16 @@ use crate::{bring_dialog_to_back, bring_dialog_to_front, update_input_control_st
  * 
  * 【状態遷移フロー】
  * [キャプチャモード OFF] → エリア選択確認 → [キャプチャモード ON]
- *                                      ↓
- *           エラー表示 ←── エリア未選択 ←┘
- *                                      ↓
- *      キーボードフック開始 + UI更新 ←── エリア選択済み
+ *                      ↓
+ *           エラー表示 ←── (エリア未選択 or 自動クリック設定不正)
+ *                      ↓
+ *      フック開始 + UI更新 ←── (エリア選択済み and 設定正常)
  * 
  * [キャプチャモード ON] → フック停止 + UI更新 → [キャプチャモード OFF]
  * 
  * 【技術的詳細】
  * - モード切り替え：app_state.is_capture_mode フラグによる状態管理
- * - リソース管理：keyboard_hook の install/uninstall による適切な解放
+ * - リソース管理：キーボードとマウスフックの install/uninstall
  * - エラーハンドリング：MessageBoxW による親切なユーザー通知
  * - UI同期：InvalidateRect による強制再描画でボタン状態を更新
  * 
@@ -98,7 +97,8 @@ use crate::{bring_dialog_to_back, bring_dialog_to_front, update_input_control_st
  * - エリア選択時：app_state.selected_area に有効な RECT が設定済み
  * 
  * 【副作用】
- * - キーボードフックの有効/無効化（システム全体への影響）
+ * - キーボードとマウスフックの有効/無効化（システム全体への影響）
+ * - 自動クリック処理中の場合、スレッドを停止させる
  * - AppState の is_capture_mode フラグ更新
  * - UI キャプチャボタンの表示状態変更
  * - コンソール出力によるデバッグ情報提供
@@ -116,6 +116,7 @@ pub fn toggle_capture_mode() {
         // 【キャプチャモード終了処理】
         app_state.is_capture_mode = false;
         uninstall_keyboard_hook(); // ESCキー監視を停止してシステムリソース解放
+        uninstall_mouse_hook();    // マウスフック停止（ドラッグ監視終了）
         
         // キャプチャモードオーバーレイを非表示
         if let Some(overlay) = app_state.capturing_overlay.as_mut() {
@@ -162,7 +163,8 @@ pub fn toggle_capture_mode() {
         // 【キャプチャモード開始処理】
         app_state.is_capture_mode = true;
         install_keyboard_hook(); // ESCキー監視開始（緊急停止用）
-        
+        install_mouse_hook();   // マウスフック開始（ドラッグ監視用）
+
         // キャプチャモードオーバーレイを表示
         if let Some(overlay) = app_state.capturing_overlay.as_mut() {
             overlay.show_overlay();
@@ -362,7 +364,7 @@ pub fn capture_screen_area_with_counter() -> Result<(), Box<dyn std::error::Erro
 
         // ピクセルデータ取得成功確認
         if result == 0 {
-            // 🔧 追加：エラー時にもアイコンを待機中に戻す
+            // エラー時にもアイコンを待機中に戻す
             switch_capture_processing(false);
             return Err("ビットマップデータの取得に失敗".into());
         }
@@ -407,7 +409,7 @@ pub fn capture_screen_area_with_counter() -> Result<(), Box<dyn std::error::Erro
         let current_counter = app_state.capture_file_counter;
         let file_path = save_dir.join(format!("{:04}.jpg", current_counter));
 
-        // 【Step 14】最高品質JPEG保存（品質100%設定）
+        // 【Step 14】JPEG保存
         // 🔧 修正：最高品質でJPEG保存（エラー時カーソル復元対応）
         use image::codecs::jpeg::JpegEncoder;
         use std::fs::File;
@@ -432,13 +434,13 @@ pub fn capture_screen_area_with_counter() -> Result<(), Box<dyn std::error::Erro
                 // 【Step 15】成功時のみ連番カウンタをインクリメント（失敗時は番号スキップを防止）
                 app_state.capture_file_counter += 1;
 
-                // 🔧 修正：処理成功時にアイコンを待機中に戻す
+                // 処理成功時にアイコンを待機中に戻す
                 switch_capture_processing(false);
 
                 Ok(()) // 全処理成功
             }
             Err(e) => {
-                // 🔧 追加：ファイル保存エラー時にもアイコンを待機中に戻す
+                // ファイル保存エラー時にもアイコンを待機中に戻す
                 switch_capture_processing(false);
                 Err(e)
             }
