@@ -184,7 +184,7 @@ pub fn export_selected_folder_to_pdf() -> Result<(), Box<dyn std::error::Error>>
         }
     };
 
-    app_log(&format!("PDF変換開始: フォルダー = {}", folder));
+    println!("PDF変換開始: フォルダー = {}", folder);
 
     // フォルダーの存在確認
     let folder_path = Path::new(&folder);

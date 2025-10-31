@@ -34,7 +34,7 @@ folder_manager.rs ← main.rs (UI処理から呼び出し)
 ============================================================================
 */
 
-use crate::app_state::*;
+use crate::{app_state::*, system_utils::app_log};
 use std::{
     ffi::OsString,
     fs::{self, File},
@@ -175,16 +175,16 @@ pub fn get_pictures_folder() -> String {
     // 各候補フォルダーを書き込み権限テストで順次評価
     for folder_path in folder_candidates {
         if is_folder_writable(&folder_path) {
-            crate::system_utils::app_log(&format!("選択されたフォルダー: {}", folder_path));
+            app_log(&format!("選択されたフォルダー: {}", folder_path));
             return format!("{}\\clickcapture", folder_path); // 最初に権限があるフォルダーで確定
         } else {
-            crate::system_utils::app_log(&format!("書き込み権限なし: {}", folder_path));
+            app_log(&format!("書き込み権限なし: {}", folder_path));
         }
     }
 
     // フォールバック戦略 - 全候補で権限テストが失敗した場合の最終手段
     let fallback = "C:\\".to_string();
-    crate::system_utils::app_log(&format!("フォールバック使用: {}", fallback));
+    app_log(&format!("フォールバック使用: {}", fallback));
     fallback
 }
 
