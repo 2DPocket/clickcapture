@@ -16,7 +16,7 @@
 - 📱 状態駆動UI：React風状態管理・宣言的UI更新
 
 【コアコンポーネント構成】
-1. 🎨 UIハンドル管理：5種類オーバーレイ＋メインダイアログ
+1. 🎨 UIハンドル管理：2種類オーバーレイ＋メインダイアログ
 2. 🎣 システムフック：マウス/キーボード低レベル監視
 3. 🎮 操作モード制御：エリア選択・キャプチャ・ドラッグ状態
 4. 📍 リアルタイム座標：マウス追跡・領域計算・DPI対応
@@ -242,7 +242,7 @@ pub struct AppState {
     // ===== ファイル管理設定 =====
     // 保存先フォルダーパス：ユーザー選択またはデフォルト（Pictures/OneDrive）
     pub selected_folder_path: Option<String>,
-    // キャプチャファイル連番：screenshot_001.jpg, screenshot_002.jpg...
+    // キャプチャファイル連番：0001.jpg, 0002.jpg...
     pub capture_file_counter: u32,
 
     // ===== 画面解像度情報 =====
@@ -259,10 +259,10 @@ pub struct AppState {
     pub capture_overlay_is_processing: bool,
 
     // ===== キャプチャ設定 =====
-    // キャプチャ画質設定：画像のスケールファクター（50%〜100%、5%刻み）
+    // キャプチャ画質設定：画像のスケールファクター（55%〜100%、5%刻み）
     // - 100: 最高画質（元の解像度のまま保存）
     // - 65: 標準画質（画質とファイルサイズのバランス良好）※デフォルト
-    // - 50: 軽量画質（ファイルサイズ重視、SNS共有に適している）
+    // - 55: 軽量画質（ファイルサイズ重視、SNS共有に適している）
     // - UI制御: ドロップダウンコンボボックスでユーザー選択
     // - 使用箇所: screen_capture.rs内でキャプチャ処理時に参照
     pub capture_scale_factor: u8,
@@ -381,13 +381,6 @@ impl AppState {
     pub fn cleanup_app_state(hwnd: HWND) {
         unsafe {
             println!("アプリケーション状態をクリーンアップします...");
-
-            // 状態のクリーンアップ
-            let app_state = AppState::get_app_state_mut();
-
-            // オーバーレイウィンドウを破棄
-            app_state.area_select_overlay = None;
-            app_state.capturing_overlay = None;
 
             
             // ダイアログのユーザーデータからAppStateへのポインタを取得
