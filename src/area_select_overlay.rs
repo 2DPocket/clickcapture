@@ -42,7 +42,7 @@ impl AreaSelectOverLay {
         // GDI+リソースの初期化
         unsafe {
             // 半透明黒背景ブラシ作成
-            let semi_transparent_black_color = Color { Argb: 0x80000000 }; // Alpha=128
+            let semi_transparent_black_color = Color { Argb: 0x99000000 }; // Alpha=128
             let status = GdipCreateSolidFill(semi_transparent_black_color.Argb, &mut overlay.semi_transparent_black_brush);
             if status != Status(0) {
                 eprintln!("❌ GdipCreateSolidFill for semi_transparent_black_brush failed with status {:?}", status);
