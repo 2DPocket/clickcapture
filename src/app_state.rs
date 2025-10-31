@@ -373,6 +373,39 @@ impl AppState {
         println!("アプリケーション状態が初期化されました");
     }
 
+
+    /// AppStateのクリーンアップ処理
+    ///
+    /// アプリケーション終了時に、init_app_stateで確保されたAppStateのメモリを安全に解放します。
+    /// WM_DESTROYメッセージハンドラから呼び出されます。
+    pub fn cleanup_app_state(hwnd: HWND) {
+        unsafe {
+            println!("アプリケーション状態をクリーンアップします...");
+
+            // 状態のクリーンアップ
+            let app_state = AppState::get_app_state_mut();
+
+            // オーバーレイウィンドウを破棄
+            app_state.area_select_overlay = None;
+            app_state.capturing_overlay = None;
+
+            
+            // ダイアログのユーザーデータからAppStateへのポインタを取得
+            let app_state_ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut AppState;
+            if !app_state_ptr.is_null() {
+                // Box::from_rawでポインタの所有権をBoxに戻す。
+                // このBoxはこの関数のスコープを抜ける際に自動的にdropされ、
+                // AppStateとそれが持つ全てのリソース（オーバーレイなど）が解放される。
+                let _ = Box::from_raw(app_state_ptr);
+                println!("🗑️ AppStateリソースを解放しました。");
+                // ポインタをクリアしてダングリングポインタを防止
+                SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
+            }
+
+        }
+    }
+
+
     /// 【状態参照取得】HWNDからAppStateへの不変参照を取得
     //
     // 概要：

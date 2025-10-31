@@ -428,8 +428,8 @@ unsafe extern "system" fn dialog_proc(
                 }
                 IDC_CLOSE_BUTTON => {
                     // 1007 - 閉じるボタン
-                    // エリア選択モードを終了してからマウスフックを解除
-                    cleanup_and_exit_dialog(hwnd, 0);
+                    // ダイアログを終了
+                    let _ = unsafe { EndDialog(hwnd, 0) };
                     return 1;
                 }
                 IDC_SCALE_COMBO => {
@@ -493,7 +493,11 @@ unsafe extern "system" fn dialog_proc(
 
         WM_CLOSE => {
             // ウィンドウの閉じるボタンが押された場合
-            cleanup_and_exit_dialog(hwnd, 0);
+            cleanup_and_exit_dialog();
+            return 1;
+        }
+        WM_DESTROY => {
+            AppState::cleanup_app_state(hwnd);
             return 1;
         }
         WM_AUTO_CLICK_COMPLETE => {
@@ -568,6 +572,8 @@ fn handle_pdf_export_button() -> isize {
     1
 }
 
+
+
 // パステキストボックスにデフォルトのピクチャフォルダーを設定
 fn init_path_edit_control(hwnd: HWND) {
     unsafe {
@@ -585,29 +591,18 @@ fn init_path_edit_control(hwnd: HWND) {
 }
 
 // 終了処理を統一する共通関数
-fn cleanup_and_exit_dialog(hwnd: HWND, exit_code: isize) {
-    unsafe {
-        app_log("ダイアログを終了しています...");
+fn cleanup_and_exit_dialog() {
+    app_log("ダイアログを終了しています...");
 
-        // 状態のクリーンアップ
-        let app_state = AppState::get_app_state_mut();
+    // 状態のクリーンアップ
+    let app_state = AppState::get_app_state_ref();
 
-        // エリア選択モード中ならキャンセル
-        if app_state.is_area_select_mode {
-            cancel_area_select_mode();
-        }
-
-        // フックを解除（順序重要：キーボード→マウス）
-        uninstall_keyboard_hook();
-        uninstall_mouse_hook();
-
-        // オーバーレイウィンドウを破棄
-        app_state.area_select_overlay = None;
-        app_state.capturing_overlay = None;
-        //destroy_tooltip_overlay();
-
-        // ダイアログを終了
-        let _ = EndDialog(hwnd, exit_code);
+    if app_state.is_capture_mode {
+        // キャプチャモード中なら終了
+        toggle_capture_mode();
+    } else if app_state.is_area_select_mode {
+        // エリア選択モード中なら終了
+        cancel_area_select_mode();
     }
 }
 

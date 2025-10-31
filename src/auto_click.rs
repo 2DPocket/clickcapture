@@ -55,7 +55,7 @@ impl AutoClicker {
     pub fn new() -> Self {
         Self {
             enabled: false,
-            stop_flag: Arc::new(AtomicBool::new(false)),
+            stop_flag: Arc::new(AtomicBool::new(true)),
             interval_ms: 1000, // デフォルト1秒
             progress_count: Arc::new(AtomicU32::new(0)),
             max_count: Arc::new(AtomicU32::new(0)), 
@@ -129,7 +129,11 @@ impl AutoClicker {
 
     /// 連続クリックを停止
     pub fn stop(&mut self) {
-        // 停止フラグを設定
+        if self.stop_flag.load(Ordering::Relaxed) {
+            return; // 既に停止している場合は何もしない
+        }
+
+        // 停止フラグをセット
         self.stop_flag.store(true, Ordering::Relaxed);
 
         // スレッドの終了を待機

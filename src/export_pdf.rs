@@ -91,7 +91,7 @@ impl PdfBuilder {
             page_width, page_height, resource_name
         );
 
-        // 🔧 修正：コンテンツストリームも無圧縮で高品質保持
+        // 🔧 コンテンツストリームも無圧縮で高品質保持
         let contents_stream = Stream::new(Dictionary::new(), contents.into_bytes());
         // コンテンツストリーム圧縮を削除 - 画質優先
         let contents_id = self.doc.add_object(contents_stream);
@@ -296,7 +296,6 @@ pub fn export_selected_folder_to_pdf() -> Result<(), Box<dyn std::error::Error>>
                     return Err(e);
                 }
             };
-
 
             println!("推定PDFサイズ: {} Byte", estimated_size.to_formatted_string(&Locale::ja));
 
