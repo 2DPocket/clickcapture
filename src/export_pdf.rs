@@ -28,6 +28,7 @@ use lopdf::{Document, Object, Stream, Dictionary, ObjectId};
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::Path;
+use num_format::{Locale, ToFormattedString};
 
 // 削除：PDFサイズ制限はAppStateから取得するため定数は不要
 
@@ -219,6 +220,11 @@ pub fn export_selected_folder_to_pdf() -> Result<(), Box<dyn std::error::Error>>
     let mut total_processed = 0;
     let total_files = entries.len();
 
+    // AppStateからPDFサイズ上限を取得
+    let app_state = AppState::get_app_state_ref();
+    let max_pdf_size_bytes = (app_state.pdf_max_size_mb as u64) * 1024 * 1024;
+    println!("PDFサイズ上限: {} Byte", max_pdf_size_bytes.to_formatted_string(&Locale::ja));
+
     for entry in entries {
         let path = entry.path();
         let filename = path.file_name()
@@ -290,11 +296,10 @@ pub fn export_selected_folder_to_pdf() -> Result<(), Box<dyn std::error::Error>>
                     return Err(e);
                 }
             };
-            
-            // AppStateからPDFサイズ上限を取得
-            let app_state = AppState::get_app_state_ref();
-            let max_pdf_size_bytes = (app_state.pdf_max_size_mb as u64) * 1024 * 1024;
-            
+
+
+            println!("推定PDFサイズ: {} Byte", estimated_size.to_formatted_string(&Locale::ja));
+
             if estimated_size > max_pdf_size_bytes as usize && files_in_current_pdf > 1 {
                 app_log(&format!("➡️ PDFサイズ制限到達 ({:.1}MB)。現在のPDFを保存して新しいPDFを開始します。", 
                         estimated_size as f64 / 1024.0 / 1024.0));
