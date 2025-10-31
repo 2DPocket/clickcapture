@@ -20,7 +20,7 @@
 2. 🎣 システムフック：マウス/キーボード低レベル監視
 3. 🎮 操作モード制御：エリア選択・キャプチャ・ドラッグ状態
 4. 📍 リアルタイム座標：マウス追跡・領域計算・DPI対応
-5. 💾 ファイル管理：自動連番・品質制御・PDF設定
+5. 💾 ファイル管理：自動連番（0001-9999）・品質制御・PDF設定
 6. 🖱️ 自動クリック機能：有効/無効、間隔、回数などの設定
 
 【高度な状態管理スコープ】
@@ -41,14 +41,14 @@
 │  └─ selected_area: 確定領域（キャプチャ対象）
 ├─ 💾 インテリジェントファイル管理
 │  ├─ selected_folder_path: OneDrive/Pictures自動検出
-│  └─ capture_file_counter: 自動連番（001-999）
+│  └─ capture_file_counter: 自動連番（0001-9999）
 ├─ 🖥️ マルチモニター・解像度管理
 │  ├─ screen_width/height: プライマリ解像度
 │  └─ DPI対応: SetProcessDPIAware統合
 ├─ 🎨 プロフェッショナル品質制御
 │  ├─ capture_scale_factor: 55%-100%（5%刻み）
 │  ├─ jpeg_quality: 70%-100%（画質・サイズ最適化）
-│  └─ pdf_max_size_mb: 500-1000MB（大容量対応）
+│  └─ pdf_max_size_mb: 20-100MB（大容量対応）
 ├─ 🖱️ 自動クリック機能
 │  ├─ auto_clicker: 自動クリックの状態と制御を管理
 └─ 🚀 高性能システム統合
@@ -203,12 +203,12 @@ pub struct AppState {
     /// - 実装: main.rs DialogBoxParamW・リソース管理
     pub dialog_hwnd: Option<SafeHWND>,
 
-    /// 半透明の矩形選択オーバーレイ
-    /// - 機能: ドラッグ中の選択範囲を視覚的に表示
+    /// エリア選択オーバーレイ
+    /// - 機能: 半透明の黒背景と、ドラッグでくり抜かれる選択範囲を描画
     /// - 実装: area_select_overlay.rs
     pub area_select_overlay: Option<AreaSelectOverLay>,
 
-    /// キャプチャモード中の状態表示オーバーレイ
+    /// キャプチャモードオーバーレイ
     /// - 機能: マウスカーソルに追従し、キャプチャ待機中や処理中の状態を表示
     /// - 実装: capturing_overlay.rs
     pub capturing_overlay: Option<CapturingOverLay>,
@@ -282,18 +282,17 @@ pub struct AppState {
     /// - 使用箇所: screen_capture.rs内でJPEGエンコード時に参照
     pub jpeg_quality: u8,
 
-    /// PDFファイル最大サイズ設定（500MB〜1000MB、100MB刻み）
+    /// PDFファイル最大サイズ設定（20MB〜100MB、20MB刻み）
     /// 
     /// PDF変換時の1つのPDFファイルの最大サイズを制御します。
     /// この値を超えた場合、新しいPDFファイルが作成されます。
     /// 
     /// # 設定値の意味
-    /// - 500: 標準サイズ（デフォルト、バランス良好）※デフォルト
-    /// - 600: やや大きめ（画像数多めのプロジェクト向け）
-    /// - 700: 大サイズ（高解像度画像多用時）
-    /// - 800: 最大級（大容量対応、転送制限に注意）
-    /// - 900: 特大サイズ（専門用途）
-    /// - 1000: 最大サイズ（メール添付制限を考慮）
+    /// - 20: 標準サイズ（デフォルト）※デフォルト
+    /// - 40: やや大きめ
+    /// - 60: 大サイズ
+    /// - 80: 最大級
+    /// - 100: 最大サイズ
     /// - UI制御: ドロップダウンコンボボックスでユーザー選択
     /// - 使用箇所: export_pdf.rs内でPDFサイズ制限判定時に参照
     pub pdf_max_size_mb: u16,
@@ -460,7 +459,7 @@ impl Default for AppState {
             capture_overlay_is_processing: false,
             capture_scale_factor: 65, // デフォルト65%（バランス良好）
             jpeg_quality: 95, // デフォルト95%（高画質）
-            pdf_max_size_mb: 500, // デフォルト500MB（標準サイズ）
+            pdf_max_size_mb: 20, // デフォルト20MB
             is_exporting_to_pdf: false,
             auto_clicker: AutoClicker::new(),
         }
