@@ -4,6 +4,10 @@
 
 **ClickCapture**は、Windowsユーザー向けに設計された、直感的で高機能なスクリーンキャプチャツールです。マウスドラッグによる簡単なエリア選択、高品質な画像保存、PDF変換、自動連続キャプチャなど、プロフェッショナルな要求に応える機能をネイティブアプリケーションの速度で提供します。
 
+
+![clickcapture](https://github.com/user-attachments/assets/a8fe62aa-8ba1-4e78-9620-8dc6f58e61ae)
+
+
 ---
 
 ## ✨ 主要機能
