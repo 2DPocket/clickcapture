@@ -30,8 +30,8 @@ use crate::constants::*;
 // オーバーレイ共通機能モジュール
 use crate::overlay::*;
 
-use crate::ui_utils::*;
-
+// UIユーティリティ群
+use crate::ui::ui_utils::*;
 
 // オーバーレイウィンドウのサイズ
 const WIN_SIZE: (i32, i32) = (230, 90); // 230x90ピクセル

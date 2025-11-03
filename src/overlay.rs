@@ -66,9 +66,19 @@ use core::str;
 
 use windows::{
     Win32::{
-        Foundation::{COLORREF, ERROR_CLASS_ALREADY_EXISTS, GetLastError, HMODULE, HWND, LPARAM, LRESULT, RECT, WPARAM}, 
-        Graphics::{Gdi::*, GdiPlus::{GdipCreateFromHDC, GdipDeleteGraphics, GdipSetSmoothingMode, GpGraphics, SmoothingModeAntiAlias, Status}}, 
-        System::LibraryLoader::GetModuleHandleW, UI::WindowsAndMessaging::*
+        Foundation::{
+            COLORREF, ERROR_CLASS_ALREADY_EXISTS, GetLastError, HMODULE, HWND, LPARAM, LRESULT,
+            RECT, WPARAM,
+        },
+        Graphics::{
+            Gdi::*,
+            GdiPlus::{
+                GdipCreateFromHDC, GdipDeleteGraphics, GdipSetSmoothingMode, GpGraphics,
+                SmoothingModeAntiAlias, Status,
+            },
+        },
+        System::LibraryLoader::GetModuleHandleW,
+        UI::WindowsAndMessaging::*,
     },
     core::{Error, PCWSTR}, // Windows API用の文字列操作
 };
@@ -76,18 +86,17 @@ use windows::{
 // アプリケーション状態管理構造体
 use crate::app_state::*;
 
-
 /// オーバーレイウィンドウプロシージャ構造体
 /// 各オーバーレイウィンドウのメッセージ処理関数ポインタを格納
 /// # フィールド
 /// - create: ウィンドウ作成時の初期化関数ポインタ
 /// - paint: ウィンドウ描画関数ポインタ
 /// - destroy: ウィンドウ破棄時のクリーンアップ関数ポインタ
-/// 
+///
 pub struct OverlayWindowProc {
-    pub create: Option<fn (hwnd: HWND)>,
-    pub paint: Option<fn (hwnd: HWND, graphics: *mut GpGraphics)>,
-    pub destroy: Option<fn (hwnd: HWND)>, 
+    pub create: Option<fn(hwnd: HWND)>,
+    pub paint: Option<fn(hwnd: HWND, graphics: *mut GpGraphics)>,
+    pub destroy: Option<fn(hwnd: HWND)>,
 }
 
 /// オーバーレイウィンドウ作成パラメータ構造体
@@ -99,7 +108,7 @@ pub struct OverlayWindowProc {
 /// - width: ウィンドウの幅
 /// - height: ウィンドウの高さ
 /// - hwnd_parent: 親ウィンドウのHWND
-/// 
+///
 pub struct OverlayWindowParams {
     pub dwex_style: WINDOW_EX_STYLE,
     pub style: WINDOW_STYLE,
@@ -145,15 +154,14 @@ impl Default for OverlayWindowClassParams {
             }
         }
     }
-}   
-
+}
 
 pub trait Overlay {
     /// HWND管理用セッター
     fn set_hwnd(&mut self, hwnd: Option<SafeHWND>);
 
     /// HWND管理用ゲッター
-    fn get_hwnd(&self) -> Option<SafeHWND>; 
+    fn get_hwnd(&self) -> Option<SafeHWND>;
 
     /// オーバーレイクラス名取得
     fn get_overlay_name(&self) -> &str;
@@ -176,30 +184,30 @@ pub trait Overlay {
     fn get_class_name(&self) -> String {
         format!("ClickCapture_{}_Class", self.get_overlay_name())
     }
- 
+
     /// オーバーレイクラスパラメータ取得
     fn get_class_params(&self) -> OverlayWindowClassParams;
 
     /// オーバーレイウィンドウ表示制御
-    /// 
+    ///
     /// # 機能
     /// - 既存オーバーレイチェック・新規作成
     /// - 最前面表示（HWND_TOPMOST）
     /// - 即座表示・ユーザーフィードバック
-    /// 
+    ///
     /// # 処理フロー
     /// 1. オーバーレイウィンドウ未作成時：create_overlay()実行
     /// 2. ShowWindow(SW_SHOW)・即座表示
-    /// 3. set_window_pos_when_show・初期ウィンドウの位置調整
-    fn show_overlay(&mut self) {
+    /// 3. set_window_pos・初期ウィンドウの位置調整
+    fn show_overlay(&mut self) -> Result<(), Error> {
         let overlay_exists = self.get_hwnd().is_some();
 
         // オーバーレイウィンドウが存在しない場合は作成
         if !overlay_exists {
-            self.create_overlay();
+            self.create_overlay()?;
         }
 
-        if let Some(hwnd) =  self.get_hwnd() {
+        if let Some(hwnd) = self.get_hwnd() {
             unsafe {
                 let _ = ShowWindow(*hwnd, SW_SHOW);
             }
@@ -209,8 +217,8 @@ pub trait Overlay {
 
             // 位置設定
             self.set_window_pos();
-
-        }   
+        }
+        Ok(())
     }
 
     // オーバーレイウィンドウの位置設定
@@ -235,17 +243,17 @@ pub trait Overlay {
         unsafe {
             if let Some(hwnd) = self.get_hwnd() {
                 let _ = InvalidateRect(Some(*hwnd), None, true);
-                let _ = UpdateWindow(*hwnd);    
+                let _ = UpdateWindow(*hwnd);
             }
         }
     }
 
     /// オーバーレイ高速非表示制御
-    /// 
+    ///
     /// # 効率設計
     /// - ウィンドウ破棄なし・ShowWindow(SW_HIDE)のみ
     /// - 再表示時：即座復帰・初期化不要
-    /// 
+    ///
     /// # 使用場面
     /// - モード切替時・状態変更
     /// - ユーザー操作キャンセル時
@@ -258,17 +266,27 @@ pub trait Overlay {
     }
 
     /// オーバーレイウィンドウ作成
-    /// 
+    ///
     /// # 処理フロー
     /// 1. ウィンドウクラス登録（RegisterClassExW）
-    /// 2. ウィンドウ作成（CreateWindowExW）
-    /// 3. HWND保存・成功/失敗ログ出力
-    /// 
-    fn create_overlay(&mut self) {
-        let class_name_wide: Vec<u16> = self.get_class_name().as_str().encode_utf16().chain(std::iter::once(0)).collect();
+    /// 2. ウィンドウ作成（`create_window`呼び出し）
+    /// 3. 成功時にHWNDを保存
+    ///
+    fn create_overlay(&mut self) -> Result<(), Error> {
+        let class_name_wide: Vec<u16> = self
+            .get_class_name()
+            .as_str()
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
         let class_name = PCWSTR(class_name_wide.as_ptr());
 
-        let window_name_wide: Vec<u16> = self.get_windows_name().as_str().encode_utf16().chain(std::iter::once(0)).collect();
+        let window_name_wide: Vec<u16> = self
+            .get_windows_name()
+            .as_str()
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
         let window_name = PCWSTR(window_name_wide.as_ptr());
 
         let hinstance;
@@ -296,35 +314,42 @@ pub trait Overlay {
         unsafe {
             if RegisterClassExW(&wc) == 0 {
                 if GetLastError().0 != ERROR_CLASS_ALREADY_EXISTS.0 {
-                    eprintln!("❌ {} オーバーレイのクラス登録に失敗", self.get_description());
-                    return;
-                }else {
-                    println!("ℹ️ {} オーバーレイのクラスは既に登録済み", self.get_description());
+                    return Err(GetLastError().into());
+                } else {
+                    println!(
+                        "ℹ️ {} オーバーレイのクラスは既に登録済み",
+                        self.get_description()
+                    );
                 }
             }
 
             overlay_result = self.create_window(hinstance, class_name, window_name);
-        }
+        };
 
-        match overlay_result {
-            Ok(hwnd) => {
-                self.set_hwnd(Some(SafeHWND(hwnd)));
-                println!("✅ {} オーバーレイを作成しました({} {})", self.get_description(), self.get_class_name().as_str(), self.get_windows_name().as_str());
-            }
-            Err(e) => {
-                eprintln!("❌ {} オーバーレイの作成に失敗しました({} {})", self.get_description(), self.get_class_name().as_str(), self.get_windows_name().as_str());
-                eprintln!("❌ エラー詳細: {:?}", e);
-            }
-        }
+        let hwnd = overlay_result?;
+        self.set_hwnd(Some(SafeHWND(hwnd)));
+        println!(
+            "✅ {} オーバーレイを作成しました({} {})",
+            self.get_description(),
+            self.get_class_name().as_str(),
+            self.get_windows_name().as_str()
+        );
+        Ok(())
     }
 
     /// オーバーレイウィンドウ作成
-    fn create_window(&self, hinstance: HMODULE, class_name: PCWSTR, window_name: PCWSTR) -> Result<HWND, Error> {
+    fn create_window(
+        &self,
+        hinstance: HMODULE,
+        class_name: PCWSTR,
+        window_name: PCWSTR,
+    ) -> Result<HWND, Error> {
         let params = self.get_window_params();
 
         // ウィンドウとSelfの関連付けを保存
         let boxed_overlay_window_proc = Box::new(self.get_window_proc());
-        let boxed_overlay_window_proc_ptr = Box::into_raw(boxed_overlay_window_proc) as *mut std::ffi::c_void;
+        let boxed_overlay_window_proc_ptr =
+            Box::into_raw(boxed_overlay_window_proc) as *mut std::ffi::c_void;
 
         let overlay_result;
         unsafe {
@@ -342,41 +367,53 @@ pub trait Overlay {
                 Some(hinstance.into()),
                 Some(boxed_overlay_window_proc_ptr),
             );
-        }            
+        }
         overlay_result
-   }
-
+    }
 
     /// オーバーレイ完全クリーンアップ・リソース解放
-    /// 
+    ///
     /// # 解放処理
     /// 1. DestroyWindow：ウィンドウ破棄・OS通知
     /// 2. UnregisterClassW：クラス登録解除・メモリ回収
-    /// 
+    ///
     fn destroy_overlay(&self) {
-            if let Some(hwnd) = self.get_hwnd() {
-                unsafe {let _ = DestroyWindow(*hwnd);}
-                println!("🗑️ {} オーバーレイ・ウィンドウを削除しました", &self.get_description());
+        if let Some(hwnd) = self.get_hwnd() {
+            unsafe {
+                let _ = DestroyWindow(*hwnd);
             }
+            println!(
+                "🗑️ {} オーバーレイ・ウィンドウを削除しました",
+                &self.get_description()
+            );
+        }
 
-            // ウィンドウクラスの登録解除
-            let hinstance = unsafe { GetModuleHandleW(None).unwrap_or_default() };
+        // ウィンドウクラスの登録解除
+        let hinstance = unsafe { GetModuleHandleW(None).unwrap_or_default() };
 
-            let class_name_wide: Vec<u16> = self.get_class_name().as_str().encode_utf16().chain(std::iter::once(0)).collect();
-            let class_name = PCWSTR(class_name_wide.as_ptr());
-            let _ = unsafe { UnregisterClassW(class_name, Some(hinstance.into())) };
+        let class_name_wide: Vec<u16> = self
+            .get_class_name()
+            .as_str()
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
+        let class_name = PCWSTR(class_name_wide.as_ptr());
+        let _ = unsafe { UnregisterClassW(class_name, Some(hinstance.into())) };
 
-            println!("🗑️ {} オーバーレイ・クラスを削除しました", &self.get_description());
-    }    
+        println!(
+            "🗑️ {} オーバーレイ・クラスを削除しました",
+            &self.get_description()
+        );
+    }
 }
 
 /// オーバーレイウィンドウプロシージャ・メッセージ処理
-/// 
+///
 /// # 処理メッセージ
 /// - WM_CREATE：初期化
 /// - WM_PAINT：描画処理
 /// - WM_DESTROY：クリーンアップ
-/// 
+///
 /// # WM_PAINT詳細処理
 /// - paint_by_update_layered_window を呼び出し、UpdateLayeredWindowを使用した高速描画を行う
 ///
@@ -392,7 +429,8 @@ extern "system" fn overlay_dispatch_proc(
             let boxed_overlay_window_proc_ptr;
             unsafe {
                 let createstruct = lparam.0 as *const CREATESTRUCTW;
-                boxed_overlay_window_proc_ptr = (*createstruct).lpCreateParams as *const OverlayWindowProc;
+                boxed_overlay_window_proc_ptr =
+                    (*createstruct).lpCreateParams as *const OverlayWindowProc;
                 overlay_window_proc = &*boxed_overlay_window_proc_ptr;
             }
 
@@ -400,14 +438,17 @@ extern "system" fn overlay_dispatch_proc(
                 create(hwnd);
             }
 
-            unsafe {SetWindowLongPtrW(hwnd, GWLP_USERDATA, boxed_overlay_window_proc_ptr as isize);}
+            unsafe {
+                SetWindowLongPtrW(hwnd, GWLP_USERDATA, boxed_overlay_window_proc_ptr as isize);
+            }
             LRESULT(0)
         }
         WM_PAINT => {
             // 各オーバーレイウィンドウの描画処理を呼び出す
             let overlay_window_proc;
             unsafe {
-                let boxed_overlay_window_proc_ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const OverlayWindowProc;
+                let boxed_overlay_window_proc_ptr =
+                    GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const OverlayWindowProc;
                 if boxed_overlay_window_proc_ptr.is_null() {
                     return LRESULT(0);
                 }
@@ -416,7 +457,7 @@ extern "system" fn overlay_dispatch_proc(
 
             let mut ps = PAINTSTRUCT::default();
             if let Some(paint) = overlay_window_proc.paint.as_ref() {
-                unsafe { 
+                unsafe {
                     let hdc = BeginPaint(hwnd, &mut ps);
                     paint_by_update_layered_window(hwnd, hdc, paint);
                     let _ = EndPaint(hwnd, &ps);
@@ -430,7 +471,8 @@ extern "system" fn overlay_dispatch_proc(
             let overlay_window_proc;
             let boxed_overlay_window_proc_ptr;
             unsafe {
-                boxed_overlay_window_proc_ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const OverlayWindowProc;
+                boxed_overlay_window_proc_ptr =
+                    GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const OverlayWindowProc;
                 overlay_window_proc = &*boxed_overlay_window_proc_ptr;
             }
 
@@ -444,7 +486,7 @@ extern "system" fn overlay_dispatch_proc(
                     // 所有権をBoxに戻し、スコープを抜ける際にメモリを安全に解放する。
                     let _ = Box::from_raw(boxed_overlay_window_proc_ptr as *mut OverlayWindowProc);
                 }
-            }            
+            }
             LRESULT(0)
         }
         _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
@@ -453,7 +495,7 @@ extern "system" fn overlay_dispatch_proc(
 
 /// UpdateLayeredWindowを使用したオーバーレイウィンドウ描画
 /// DIBを作成し、GDI+で描画後にUpdateLayeredWindowで反映
-/// 
+///
 /// # 引数
 /// - hwnd: オーバーレイウィンドウのHWND   
 /// - hdc: オーバーレイウィンドウのHDC
@@ -490,11 +532,14 @@ extern "system" fn overlay_dispatch_proc(
 /// /// /// paint_by_update_layered_window(hwnd, hdc, &my_paint_function);
 /// /// ```
 ///
-fn paint_by_update_layered_window(hwnd: HWND, hdc: HDC, paint: &fn (hwnd: HWND, graphics: *mut GpGraphics)) {
-
+fn paint_by_update_layered_window(
+    hwnd: HWND,
+    hdc: HDC,
+    paint: &fn(hwnd: HWND, graphics: *mut GpGraphics),
+) {
     // クライアント領域サイズ取得
     let mut client_rect = RECT::default();
-    unsafe { 
+    unsafe {
         let _ = GetClientRect(hwnd, &mut client_rect);
     }
 
@@ -503,7 +548,7 @@ fn paint_by_update_layered_window(hwnd: HWND, hdc: HDC, paint: &fn (hwnd: HWND, 
 
     // UpdateLayeredWindow用のメモリDCと32bpp DIBを作成
     let mem_dc = unsafe { CreateCompatibleDC(Some(hdc)) };
-                    
+
     let bmi = BITMAPINFO {
         bmiHeader: BITMAPINFOHEADER {
             biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
@@ -518,7 +563,7 @@ fn paint_by_update_layered_window(hwnd: HWND, hdc: HDC, paint: &fn (hwnd: HWND, 
     };
 
     let mut bits = std::ptr::null_mut();
-    
+
     let mem_bmp;
     let old_bmp;
     unsafe {
@@ -529,23 +574,31 @@ fn paint_by_update_layered_window(hwnd: HWND, hdc: HDC, paint: &fn (hwnd: HWND, 
             &mut bits,
             None,
             0,
-        ).expect("DIBセクションの作成に失敗しました");
-        
+        )
+        .expect("DIBセクションの作成に失敗しました");
+
         old_bmp = SelectObject(mem_dc, mem_bmp.into());
     }
 
     // DIBSectionが選択されたメモリDCからGDI+のGraphicsオブジェクトを作成
     let mut graphics: *mut GpGraphics = std::ptr::null_mut();
-    unsafe { 
+    unsafe {
         let status = GdipCreateFromHDC(mem_dc, &mut graphics);
-        if status != Status(0) { // Status(0) は Ok
-            eprintln!("❌ Error: GdipCreateFromHDC failed with status {:?}", status);
+        if status != Status(0) {
+            // Status(0) は Ok
+            eprintln!(
+                "❌ Error: GdipCreateFromHDC failed with status {:?}",
+                status
+            );
             return; // Graphicsオブジェクトが作成できないと後続処理は不可能
         }
 
         let status = GdipSetSmoothingMode(graphics, SmoothingModeAntiAlias);
         if status != Status(0) {
-            eprintln!("❌ Warning: GdipSetSmoothingMode failed with status {:?}", status);
+            eprintln!(
+                "❌ Warning: GdipSetSmoothingMode failed with status {:?}",
+                status
+            );
         }
     };
 
@@ -553,8 +606,8 @@ fn paint_by_update_layered_window(hwnd: HWND, hdc: HDC, paint: &fn (hwnd: HWND, 
     paint(hwnd, graphics);
 
     // GDI+リソースの解放
-    unsafe { 
-        GdipDeleteGraphics(graphics); 
+    unsafe {
+        GdipDeleteGraphics(graphics);
     };
 
     // UpdateLayeredWindowで画面に反映
@@ -565,11 +618,24 @@ fn paint_by_update_layered_window(hwnd: HWND, hdc: HDC, paint: &fn (hwnd: HWND, 
         AlphaFormat: AC_SRC_ALPHA as u8,
     };
 
-    let size = windows::Win32::Foundation::SIZE { cx: width, cy: height };
+    let size = windows::Win32::Foundation::SIZE {
+        cx: width,
+        cy: height,
+    };
     let pt_src = windows::Win32::Foundation::POINT { x: 0, y: 0 };
 
     unsafe {
-        let _ = UpdateLayeredWindow(hwnd, Some(hdc), None, Some(&size), Some(mem_dc), Some(&pt_src), COLORREF(0), Some(&blend_function), ULW_ALPHA);
+        let _ = UpdateLayeredWindow(
+            hwnd,
+            Some(hdc),
+            None,
+            Some(&size),
+            Some(mem_dc),
+            Some(&pt_src),
+            COLORREF(0),
+            Some(&blend_function),
+            ULW_ALPHA,
+        );
     }
 
     // GDIリソースの解放
@@ -578,7 +644,4 @@ fn paint_by_update_layered_window(hwnd: HWND, hdc: HDC, paint: &fn (hwnd: HWND, 
         let _ = DeleteObject(mem_bmp.into());
         let _ = DeleteDC(mem_dc);
     }
-
-}    
-
-        
+}

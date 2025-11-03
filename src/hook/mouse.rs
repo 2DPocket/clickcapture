@@ -31,10 +31,9 @@ SetWindowsHookExW → low_level_mouse_proc コールバック → イベント�
                          │   ├─ is_area_select_mode: ドラッグ開始状態に移行
                          │   └─ is_capture_mode: 自動クリック開始 or 単発キャプチャ実行
                          └─ WM_LBUTTONUP → ドラッグ終了
-                             └─ is_dragging: エリア選択を完了
-    └─ WM_LBUTTONUP → ドラッグ終了 or キャプチャ実行
+                             └─ is_dragging: エリア選択を完了し、イベントを消費
                          ↓
-                   CallNextHookEx → 他のアプリへイベント継続
+                   CallNextHookEx → 他のアプリへイベントを継続（キャプチャモードのクリックは透過）
 
 【パフォーマンス最適化】
 - 直接メモリアクセス：AppState への unsafe アクセス
@@ -87,7 +86,7 @@ pub fn install_mouse_hook() {
 
         if let Ok(hook) = hook {
             let app_state = AppState::get_app_state_mut();
-           
+
             app_state.mouse_hook = Some(SafeHHOOK(hook)); // AppState構造体にフックハンドルを保存
             println!("マウスフックを開始しました");
         } else {
@@ -157,7 +156,6 @@ unsafe extern "system" fn low_level_mouse_proc(
                     // ===== マウス移動イベント =====
                     // マウスが移動するたびに呼び出される
 
-
                     // 🔧 キャプチャモードオーバーレイの位置更新
                     if app_state.is_capture_mode {
                         if let Some(overlay) = app_state.capturing_overlay.as_mut() {
@@ -175,7 +173,6 @@ unsafe extern "system" fn low_level_mouse_proc(
                         if let Some(overlay) = app_state.area_select_overlay.as_mut() {
                             overlay.refresh_overlay();
                         }
-
                     }
                 }
                 WM_LBUTTONDOWN => {
@@ -209,12 +206,11 @@ unsafe extern "system" fn low_level_mouse_proc(
                     }
                     // 画面キャプチャモード中の左クリック処理
                     else {
-
                         if app_state.is_capture_mode {
-
-
                             // 連続クリックが有効な場合のみ機能を初期化＆開始
-                            if app_state.auto_clicker.is_enabled() && !app_state.auto_clicker.is_running() {
+                            if app_state.auto_clicker.is_enabled()
+                                && !app_state.auto_clicker.is_running()
+                            {
                                 let _ = app_state.auto_clicker.start(current_pos);
                                 return LRESULT(1); // イベントを消費
                             }
@@ -226,7 +222,6 @@ unsafe extern "system" fn low_level_mouse_proc(
                                 "画面キャプチャ実行: ファイル {}.jpg",
                                 app_state.capture_file_counter - 1
                             );
-
 
                             // 【重要】左クリック後もキャプチャモードは継続するが、
                             // 他のアプリケーションにも左クリックイベントを渡す

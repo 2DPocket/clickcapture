@@ -45,42 +45,40 @@ use std::{
 use windows::{
     Win32::{
         Foundation::{HWND, LPARAM},
-        System::{
-            Com::{CoInitialize, CoTaskMemFree},
-        },
+        System::Com::{CoInitialize, CoTaskMemFree},
         UI::{
             Shell::{BROWSEINFOW, SHBrowseForFolderW, SHGetPathFromIDListW},
             WindowsAndMessaging::{GetDlgItem, SetWindowTextW},
         },
-    }, 
-    core::PCWSTR
+    },
+    core::PCWSTR,
 };
 
 /**
  * フォルダー選択ダイアログを表示する関数
- * 
+ *
  * 【機能説明】
  * Windows標準のSHBrowseForFolderW APIを使用してフォルダー選択ダイアログを表示し、
  * ユーザーが選択したフォルダーパスをアプリケーション状態に保存する。
- * 
+ *
  * 【技術的詳細】
  * - COM環境の初期化と自動クリーンアップ
  * - BIF_NEWDIALOGSTYLEフラグによるモダンなダイアログ表示
  * - Unicode文字列の適切な変換処理（UTF-16 ↔ UTF-8）
  * - メモリ管理：CoTaskMemFreeによるShell API用メモリの適切な解放
- * 
+ *
  * 【パラメータ】
  * parent_hwnd: ダイアログの親ウィンドウハンドル（モーダル表示のため）
- * 
+ *
  * 【状態更新】
  * - AppState.selected_folder_pathの更新
  * - UI制御ID 1002（パス表示テキストボックス）への反映
- * 
+ *
  * 【エラーハンドリング】
  * - pidlがnullの場合（キャンセルまたは失敗）は何も実行しない
  * - パス変換失敗時は状態更新をスキップ
  * - UI更新失敗時は無視（アプリケーションの継続性を重視）
- * 
+ *
  * 【AIおよび第三者解析用の技術ノート】
  * このfunctionは Windows Shell API の複雑さを隠蔽し、Rustの安全性を
  * 保ちながらネイティブWindows UIを提供する重要な統合ポイントです。
@@ -92,16 +90,19 @@ pub fn show_folder_dialog(parent_hwnd: HWND) {
         let _ = CoInitialize(None);
 
         // BROWSEINFOW構造体の設定 - フォルダー選択ダイアログのパラメータ
-        let title_wide: Vec<u16> = "保存先フォルダーを選択してください".encode_utf16().chain(std::iter::once(0)).collect();
+        let title_wide: Vec<u16> = "保存先フォルダーを選択してください"
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
         let mut browse_info = BROWSEINFOW {
-            hwndOwner: parent_hwnd,        // 親ウィンドウ（モーダル表示用）
-            pidlRoot: ptr::null_mut(),     // ルートフォルダー指定なし（全ドライブ表示）
+            hwndOwner: parent_hwnd,                       // 親ウィンドウ（モーダル表示用）
+            pidlRoot: ptr::null_mut(), // ルートフォルダー指定なし（全ドライブ表示）
             pszDisplayName: windows::core::PWSTR::null(), // 表示名バッファ（未使用）
             lpszTitle: PCWSTR(title_wide.as_ptr()),
-            ulFlags: 0x00000040,           // BIF_NEWDIALOGSTYLE - モダンなダイアログ表示
-            lpfn: None,                    // コールバック関数なし
-            lParam: LPARAM(0),             // 追加パラメータなし
-            iImage: 0,                     // アイコンインデックス
+            ulFlags: 0x00000040, // BIF_NEWDIALOGSTYLE - モダンなダイアログ表示
+            lpfn: None,          // コールバック関数なし
+            lParam: LPARAM(0),   // 追加パラメータなし
+            iImage: 0,           // アイコンインデックス
         };
 
         // フォルダー選択ダイアログ表示 - ユーザー操作待機
@@ -111,7 +112,7 @@ pub fn show_folder_dialog(parent_hwnd: HWND) {
         if !pidl.is_null() {
             // MAX_PATH サイズの Unicode文字列バッファ準備
             let mut path = [0u16; 260]; // Windows MAX_PATH定数
-            
+
             // PIDL（Item ID List）から実際のファイルシステムパスへ変換
             if SHGetPathFromIDListW(pidl, &mut path).as_bool() {
                 // UTF-16からRust文字列への変換処理
@@ -128,40 +129,40 @@ pub fn show_folder_dialog(parent_hwnd: HWND) {
                     let _ = SetWindowTextW(path_edit, PCWSTR(path.as_ptr()));
                 }
             }
-            
+
             // Shell API用メモリの適切な解放 - メモリリーク防止
             CoTaskMemFree(Some(pidl as *const _ as *const _));
         }
-        
+
         // COM環境のクリーンアップは自動的に行われる（Drop trait）
     }
 }
 
 /**
  * 保存先フォルダーを決定する関数
- * 
+ *
  * 【機能説明】
  * スクリーンショット保存に最適なフォルダーを自動的に決定します。
  * 複数の候補フォルダーを優先順位に従ってテストし、書き込み権限がある
  * 最初のフォルダーを選択する堅牢なフォールバック戦略を実装しています。
- * 
+ *
  * 【アルゴリズム】
  * 1. get_folder_candidates()から優先順位付きフォルダー候補を取得
  * 2. 各候補に対してis_folder_writable()で書き込み権限をテスト
  * 3. 権限があるフォルダーが見つかった時点で即座にreturn
  * 4. 全候補で権限がない場合はC:\をフォールバックとして使用
- * 
+ *
  * 【優先順位戦略】
  * OneDrive画像フォルダー > ローカル画像フォルダー > ドキュメント > デスクトップ
  * > 共通画像フォルダー > 共通ドキュメント > システムルート
- * 
+ *
  * 【戻り値】
  * String: 書き込み権限がある有効なフォルダーパス（必ず有効なパスを返す）
- * 
+ *
  * 【副作用】
  * - 標準出力にフォルダー選択プロセスのログを出力
  * - 必要に応じてフォルダーの作成を試行（is_folder_writable内で実行）
- * 
+ *
  * 【AIおよび第三者解析用の技術ノート】
  * この関数は fail-safe設計を採用しており、どのような環境でも必ず
  * 有効なフォルダーパスを返します。優先順位は一般的なWindowsユーザーの
@@ -190,11 +191,11 @@ pub fn get_pictures_folder() -> String {
 
 /**
  * フォルダー候補を優先順位順で取得する内部関数
- * 
+ *
  * 【機能説明】
  * Windowsユーザー環境における一般的なフォルダー使用パターンに基づいて、
  * スクリーンショット保存に適したフォルダー候補を優先順位付きで生成します。
- * 
+ *
  * 【優先順位戦略の根拠】
  * 1. OneDrive統合: クラウド同期による自動バックアップ
  * 2. ローカル画像フォルダー: 最も直感的なスクリーンショット保存場所
@@ -202,18 +203,18 @@ pub fn get_pictures_folder() -> String {
  * 4. デスクトップ: 一時的なアクセスの容易さ
  * 5. 共通フォルダー: マルチユーザー環境での利用可能性
  * 6. システムルート: 最終フォールバック
- * 
+ *
  * 【国際化対応】
  * 日本語版Windows（"画像"フォルダー）と英語版Windows（"Pictures"フォルダー）の
  * 両方に対応し、言語設定に関係なく適切なフォルダーを検出できます。
- * 
+ *
  * 【戻り値】
  * Vec<String>: 優先順位順に並んだフォルダーパス候補のリスト
- * 
+ *
  * 【エラーハンドリング】
  * USERPROFILE環境変数が取得できない場合でも、システム共通フォルダーと
  * フォールバックにより継続動作を保証します。
- * 
+ *
  * 【AIおよび第三者解析用の技術ノート】
  * この関数は Windows環境の多様性（OneDrive有無、言語設定、ユーザー権限）
  * を考慮した包括的なアプローチを採用しています。環境変数への依存度を
@@ -224,14 +225,13 @@ fn get_folder_candidates() -> Vec<String> {
 
     // USERPROFILE環境変数からユーザーホームディレクトリを取得
     if let Ok(user_profile) = std::env::var("USERPROFILE") {
-        
         // 【優先順位1】OneDriveの画像フォルダー - クラウド同期による保護
-        candidates.push(format!("{}\\OneDrive\\画像", user_profile));     // 日本語版Windows
+        candidates.push(format!("{}\\OneDrive\\画像", user_profile)); // 日本語版Windows
         candidates.push(format!("{}\\OneDrive\\Pictures", user_profile)); // 英語版Windows
 
         // 【優先順位2】ローカルの画像フォルダー - 標準的なスクリーンショット保存場所
-        candidates.push(format!("{}\\Pictures", user_profile));           // 英語版Windows
-        candidates.push(format!("{}\\画像", user_profile));               // 日本語版Windows
+        candidates.push(format!("{}\\Pictures", user_profile)); // 英語版Windows
+        candidates.push(format!("{}\\画像", user_profile)); // 日本語版Windows
 
         // 【優先順位3】ドキュメントフォルダー - 作業関連ファイルとの整理
         candidates.push(format!("{}\\Documents", user_profile));
@@ -252,37 +252,37 @@ fn get_folder_candidates() -> Vec<String> {
 
 /**
  * フォルダーの書き込み権限を実用的にテストする内部関数
- * 
+ *
  * 【機能説明】
  * 指定されたフォルダーに対してファイル書き込み権限があるかを実際の
  * ファイル作成操作によってテストします。理論的な権限チェックではなく、
  * 実用的な検証を行うことで確実性を保証します。
- * 
+ *
  * 【テスト手順】
  * 1. フォルダー存在確認 - 存在しない場合は自動作成を試行
  * 2. ディレクトリ有効性確認 - ファイルでないことを検証
  * 3. 実際のファイル作成テスト - 一時ファイル作成による権限検証
  * 4. クリーンアップ - テスト用一時ファイルの削除
- * 
+ *
  * 【パラメータ】
  * folder_path: &str - テスト対象フォルダーのパス文字列
- * 
+ *
  * 【戻り値】
  * bool: true=書き込み可能, false=書き込み不可能または権限なし
- * 
+ *
  * 【副作用】
  * - 存在しないフォルダーの自動作成を試行（失敗時は false を返す）
  * - 一時ファイル "write_test_temp.tmp" の作成と削除
- * 
+ *
  * 【エラーハンドリング】
  * - フォルダー作成失敗: false を返して継続
  * - ファイル作成失敗: false を返して継続  
  * - ファイル削除失敗: 無視（一時ファイルのため）
- * 
+ *
  * 【セキュリティ考慮事項】
  * 実際のファイル作成により権限テストを行うため、権限昇格攻撃や
  * symlink攻撃に対する防御として、予測可能な一時ファイル名を使用しています。
- * 
+ *
  * 【AIおよび第三者解析用の技術ノート】
  * この関数は Windows ACL（Access Control List）の複雑さを回避し、
  * 実用的なアプローチで書き込み権限を検証します。理論上の権限と

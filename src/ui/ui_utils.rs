@@ -10,10 +10,11 @@ use windows::{
         Foundation::{HINSTANCE, COLORREF, RECT}, // 基本的なデータ型
         Graphics::Gdi::*,             // GDIグラフィック描画機能
         UI::{
-            Controls::DRAWITEMSTRUCT, WindowsAndMessaging::* // ウィンドウとメッセージ処理
+            Controls::DRAWITEMSTRUCT, WindowsAndMessaging::*, // ウィンドウとメッセージ処理
+            Shell::SHCreateMemStream, // メモリストリーム作成
         },
         System:: {
-            Com::{IStream},
+            Com::IStream,
             LibraryLoader::{FindResourceW, GetModuleHandleW, LoadResource, LockResource, SizeofResource},
         },
         Media::KernelStreaming::RT_RCDATA, // リソースタイプ定義
@@ -27,7 +28,9 @@ use windows::Win32::Graphics::GdiPlus::{
 };
 
 use std::slice;
-use windows::Win32::UI::Shell::SHCreateMemStream;
+
+// アプリケーション状態管理構造体
+use crate::app_state::AppState;
 
 // アイコンボタンを描画する共通関数
 pub fn draw_icon_button(

@@ -2,12 +2,12 @@
 ============================================================================
 ClickCapture - Windows Screen Capture Tool with Area Selection (main.rs)
 ============================================================================
- 
+
 【アプリケーション概要】
 Windows専用プロフェッショナルスクリーンキャプチャアプリケーション
 マウス操作による直感的な画面領域選択とリアルタイム視覚フィードバック、
-高品質画像保存・PDF変換、自動クリック機能を統合したワンストップソリューション
- 
+高品質画像保存・PDF変換、自動クリック機能を統合したワンストップソリューション。
+
 【主要機能一覧】（完成度95%）
 1. 🔍 エリア選択モード：マウスドラッグによる矩形領域選択 + 半透明オーバーレイ
 2. 📷 キャプチャモード：左クリック一発で即座に画面保存 + 自動連番
@@ -28,28 +28,30 @@ Windows専用プロフェッショナルスクリーンキャプチャアプリ�
 ├─ 画像処理：image crate 0.25（高品質JPEG圧縮、メモリ効率最適化）
 ├─ PDF生成：カスタムPdfBuilder（メモリ管理、サイズ制限、エラー耐性）
 └─ リソース管理：RAII + 明示的cleanup（100%メモリリーク防止）
- 
+
 【モジュール構成・依存関係図】
                     main.rs（メインエントリー）
-                        ↓
-        ┌───────────────────┼───────────────────┬──────────────────┐
-        ↓                   ↓                   ↓                  ↓
-   app_state.rs        mouse.rs          keyboard.rs        auto_click.rs
-   （状態管理）      （マウスフック）      （キーフック）     （自動クリック）
-        │                   │                   │
-        │                   │                   └─> area_select.rs, screen_capture.rs
-        │                   │
-        │                   └─> area_select.rs, screen_capture.rs
-        │
-        └─> overlay.rs, area_select_overlay.rs, capturing_overlay.rs
- 
+                        |
+        +---------------+---------------+---------------+
+        |               |               |               |
+   app_state.rs      hook.rs         overlay.rs      auto_click.rs
+   （状態管理）   （フック管理）    （オーバーレイ）   （自動クリック）
+        |               |               |
+        |               |               +-> area_select_overlay.rs
+        |               |               +-> capturing_overlay.rs
+        |               |
+        |               +-> hook/mouse.rs
+        |               +-> hook/keyboard.rs
+        |
+        +-> area_select.rs, screen_capture.rs, export_pdf.rs, ...
+
    (その他主要モジュール)
    - export_pdf.rs: PDF変換
    - system_utils.rs: OS連携
    - folder_manager.rs: フォルダー管理
    - constants.rs: 定数管理
    - ui_utils.rs: UI描画ユーティリティ
- 
+
 【ユーザー操作フロー・状態遷移】
 [アプリ起動] → DPI設定 → フック初期化 → [メインUI待機]
                                               ↓
@@ -72,7 +74,7 @@ Windows専用プロフェッショナルスクリーンキャプチャアプリ�
                       [コンボボックス操作] → リアルタイム設定更新
                                               ↓
                       [PDF変換ボタン] → 確認ダイアログ → 一括変換実行
- 
+
 【パフォーマンス・品質指標】
 - マウスレスポンス：<1ms（システムレベル最適化）
 - メモリ使用量：<8MB（画像処理バッファ除く）
@@ -88,28 +90,28 @@ Windows専用プロフェッショナルスクリーンキャプチャアプリ�
 5. 完全リソース管理：Drop trait + 明示的cleanup関数
 6. GDI+最適化：メモリDCへの描画によるダブルバッファリング
 7. メモリ効率：ゼロコピー画像処理 + スマートポインタ
- 
+
 【依存クレート・バージョン管理】
 - windows = "0.62.2"（Microsoft公式Rust Windows API）
 - image = "0.25"（高速画像処理、メモリ最適化）
 - embed-resource = "2.4"（Windowsリソース統合）
- 
+
 【ファイル責任・API境界】
 - main.rs：エントリー、ダイアログ管理、メッセージループ、UI制御
 - app_state.rs：グローバル状態、スレッドセーフWrapper、ライフタイム管理
-- mouse.rs：マウスフック、座標変換、クリック検出、イベント転送
-- keyboard.rs：キーボードフック、ショートカット、緊急停止
+- hook.rs: マウスとキーボードフックの統合管理
+- hook/mouse.rs：マウスフック、座標変換、クリック検出、イベント転送
+- hook/keyboard.rs：キーボードフック、ショートカット、緊急停止
 - area_select.rs：領域選択ロジック、ドラッグ処理、座標計算
 - auto_click.rs: 自動クリック機能、スレッド管理
 - screen_capture.rs：画面キャプチャ、JPEG圧縮、ファイル保存
 - overlay.rs：オーバーレイウィンドウ、透明度制御、リージョン管理
-- capturing_overlay.rs：キャプチャモード表示、状態フィードバック
 - export_pdf.rs：PDF生成、メモリ管理、進捗表示
 - system_utils.rs：OS連携、フォルダー操作、アイコン管理
 - folder_manager.rs：保存先管理、パス解決
 - constants.rs：定数定義、リソースID、設定値
-- ui_utils.rs: オーナードローボタン描画などのUI関連ユーティリティ
- 
+- ui.rs: UI関連モジュールの集約
+
 【開発・保守・品質ガイドライン】
 - 安全性：unsafe最小化、境界チェック、null安全
 - パフォーマンス：リアルタイム制約最優先、メモリ効率
@@ -129,19 +131,26 @@ Windows専用プロフェッショナルスクリーンキャプチャアプリ�
 ============================================================================
 */
 
-
 // 必要なライブラリ（外部機能）をインポート
 use windows::{
     Win32::{
         Foundation::{HWND, LPARAM, WPARAM}, // 基本的なデータ型
-        Graphics::{Gdi::*, GdiPlus::{GdiplusShutdown, GdiplusStartup, GdiplusStartupInput, GdiplusStartupOutput, Status}},                                              // グラフィック描画機能
+        Graphics::{
+            Gdi::*,
+            GdiPlus::{
+                GdiplusShutdown, GdiplusStartup, GdiplusStartupInput, GdiplusStartupOutput, Status,
+            },
+        }, // グラフィック描画機能
         UI::{
-            Controls::{BST_CHECKED, BST_UNCHECKED, CheckDlgButton, DRAWITEMSTRUCT, IsDlgButtonChecked}, Input::KeyboardAndMouse::EnableWindow, WindowsAndMessaging::* // ウィンドウとメッセージ処理
+            Controls::{
+                BST_CHECKED, BST_UNCHECKED, CheckDlgButton, DRAWITEMSTRUCT, IsDlgButtonChecked,
+            },
+            Input::KeyboardAndMouse::EnableWindow,
+            WindowsAndMessaging::*, // ウィンドウとメッセージ処理
         },
     },
     core::PCWSTR, // Windows API用の文字列操作
 };
-
 
 // オーナードロー用の構造体定義
 
@@ -154,10 +163,9 @@ mod constants;
 use constants::*;
 
 // Windows標準通知コード
-const CBN_SELCHANGE: u16 = 1;  // コンボボックスの選択変更通知
-const BN_CLICKED: u16 = 0;     // ボタンクリック通知
+const CBN_SELCHANGE: u16 = 1; // コンボボックスの選択変更通知
+const BN_CLICKED: u16 = 0; // ボタンクリック通知
 const EN_KILLFOCUS: u16 = 0x0200; // エディットボックスがフォーカスを失ったときの通知
-
 
 // コンボボックスメッセージ定数
 const CB_ADDSTRING: u32 = 0x0143;
@@ -171,7 +179,6 @@ const CB_GETCURSEL: u32 = 0x0147;
 */
 mod app_state;
 use app_state::*;
-
 
 /*
 ============================================================================
@@ -229,21 +236,23 @@ mod hook;
  */
 mod auto_click;
 
-
 /*
 ============================================================================
 UI部品描画、管理関数
 ============================================================================
  */
-mod ui_utils;
-use ui_utils::*;
+mod ui;
+use crate::ui::{
+    ui_utils::draw_icon_button, update_input_control_states::update_auto_click_controls_state,
+};
+use ui::update_input_control_states::update_input_control_states;
+
 /*
 ============================================================================
 アプリケーションエントリーポイント
 ============================================================================
 */
 fn main() {
-
     println!("アプリケーションを開始します...");
     // アプリケーション状態を初期化
     unsafe {
@@ -336,7 +345,7 @@ unsafe extern "system" fn dialog_proc(
             }
 
             // アプリケーションアイコン設定
-            set_application_icon(); 
+            set_application_icon();
 
             // アイコンボタンを初期化
             initialize_icon_button(hwnd);
@@ -361,15 +370,15 @@ unsafe extern "system" fn dialog_proc(
             return 1;
         }
         WM_COMMAND => {
-            let id = (wparam.0 & 0xFFFF) as i32;  // 下位16ビットのみ取得：ID
-            let notify_code = (wparam.0 >> 16) as u16;  // 上位16ビット：通知コード
-            
+            let id = (wparam.0 & 0xFFFF) as i32; // 下位16ビットのみ取得：ID
+            let notify_code = (wparam.0 >> 16) as u16; // 上位16ビット：通知コード
+
             // デバッグ用：全てのWM_COMMANDを記録
             // if notify_code > 0 {
-            //     println!("WM_COMMAND - ID: {} (0x{:X}), 通知コード: {}, 元のwparam: {} (0x{:X})", 
+            //     println!("WM_COMMAND - ID: {} (0x{:X}), 通知コード: {}, 元のwparam: {} (0x{:X})",
             //              id, id, notify_code, wparam.0, wparam.0);
             // }
-            
+
             match id {
                 IDC_BROWSE_BUTTON => {
                     // 1001
@@ -413,7 +422,7 @@ unsafe extern "system" fn dialog_proc(
                         println!("スケールコンボボックスの選択が変更されました");
                         handle_scale_combo_change(hwnd);
                     }
-                    
+
                     return 1;
                 }
                 IDC_QUALITY_COMBO => {
@@ -502,17 +511,19 @@ unsafe extern "system" fn dialog_proc(
 fn handle_pdf_export_button() -> isize {
     unsafe {
         // 確認ダイアログを表示
-        let result = show_message_box("PDF変換を開始してもよろしいでしょうか？\n\n選択されたフォルダー内のJPEG画像を\nPDFファイルに変換します。", 
+        let result = show_message_box(
+            "PDF変換を開始してもよろしいでしょうか？\n\n選択されたフォルダー内のJPEG画像を\nPDFファイルに変換します。",
             "PDF変換確認",
-                MB_OKCANCEL | MB_ICONQUESTION);
-        
+            MB_OKCANCEL | MB_ICONQUESTION,
+        );
+
         if result.0 == IDOK.0 {
             app_log("PDF変換を開始します...");
-            
+
             // カーソルを砂時計に変更
             let wait_cursor = LoadCursorW(None, IDC_WAIT).unwrap_or_default();
             let original_cursor = SetCursor(Some(wait_cursor));
-            
+
             // PDF変換実行（RAIIパターンでカーソー復元を保証）
             let conversion_result = {
                 let app_state = AppState::get_app_state_mut();
@@ -525,7 +536,7 @@ fn handle_pdf_export_button() -> isize {
                 SetCursor(Some(original_cursor));
                 result
             };
-            
+
             // 結果処理
             match conversion_result {
                 Err(e) => {
@@ -534,7 +545,11 @@ fn handle_pdf_export_button() -> isize {
                     show_message_box(&error_message, "PDF変換エラー", MB_OK | MB_ICONERROR);
                 }
                 Ok(_) => {
-                    show_message_box("PDF変換が正常に完了しました。", "PDF変換完了", MB_OK | MB_ICONINFORMATION);
+                    show_message_box(
+                        "PDF変換が正常に完了しました。",
+                        "PDF変換完了",
+                        MB_OK | MB_ICONINFORMATION,
+                    );
                 }
             }
         } else {
@@ -543,8 +558,6 @@ fn handle_pdf_export_button() -> isize {
     }
     1
 }
-
-
 
 // パステキストボックスにデフォルトのピクチャフォルダーを設定
 fn init_path_edit_control(hwnd: HWND) {
@@ -578,7 +591,6 @@ fn cleanup_and_exit_dialog(hwnd: HWND) {
     }
 
     let _ = unsafe { EndDialog(hwnd, 0) };
-
 }
 
 // ===== アイコンボタン制御関数 =====
@@ -612,84 +624,6 @@ fn initialize_icon_button(hwnd: HWND) {
         }
     }
 }
-
-/// 各モードに応じて全ボタンの有効/無効を動的制御する関数
-/// 
-/// # モード別動作
-/// - **通常モード**: エリア選択有効、キャプチャは選択エリア有無で判定
-/// - **エリア選択モード**: エリア選択のみ有効（キャンセル用）、他は無効
-/// - **キャプチャモード**: キャプチャのみ有効（キャンセル用）、他は無効
-/// - **ドラッグ中**: 全ボタン無効（操作完了待ち）
-/// 
-/// # 呼び出しタイミング
-/// - エリア選択モード開始・終了時
-/// - キャプチャモード開始・終了時  
-/// - PDF変換開始・終了時
-pub fn update_input_control_states() {
-    let app_state = AppState::get_app_state_ref();
-    
-    // ダイアログハンドルを取得
-    let hwnd = match app_state.dialog_hwnd {
-        Some(safe_hwnd) => *safe_hwnd,
-        None => return, // ダイアログが初期化されていない場合は何もしない
-    };
-    
-    // モード判定とボタン状態決定
-    let (area_select_enable, capture_enable, browse_enable, export_pdf_enable, close_enable,
-            auto_click_enable, property_combobox_enable) = 
-        if app_state.is_area_select_mode {
-            // エリア選択モード中：エリア選択ボタンと閉じるボタンのみ表示
-            (true, false, false, false, true, false, false)
-        } else if app_state.is_capture_mode {
-            // キャプチャモード中：キャプチャボタンと閉じるボタンのみ表示
-            (false, true, false, false, true, false, false)
-        } else if app_state.is_exporting_to_pdf {
-            // PDF変換中：全てのボタンを無効化
-            (false, false, false, false, false, false, false)
-        } else {
-            // 通常モード：エリア選択済みならキャプチャ表示、他は全て表示
-            (true, true, true, true, true, true, true)
-        };
-
-    // ボタン表示制御関数
-    fn set_input_control_status(hwnd: HWND, button_id: i32, enabled: bool) {
-        unsafe {
-            if let Ok(button) = GetDlgItem(Some(hwnd), button_id) {
-                let _ = EnableWindow(button, enabled);
-                // InvalidateRectはオーナードローボタンには有効だが、標準コントロールの
-                // グレーアウト状態を即座に反映させるにはUpdateWindowで強制的に再描画を促すのが確実。
-                let _ = InvalidateRect(Some(button), None, true); // オーナードローボタンのために残す
-                let _ = UpdateWindow(button); // 標準コントロールのために追加
-            }
-        }
-    }
-
-    // 各ボタンの表示制御
-    set_input_control_status(hwnd, IDC_AREA_SELECT_BUTTON, area_select_enable);
-    set_input_control_status(hwnd, IDC_CAPTURE_START_BUTTON, capture_enable);
-    set_input_control_status(hwnd, IDC_BROWSE_BUTTON, browse_enable);
-    set_input_control_status(hwnd, IDC_EXPORT_PDF_BUTTON, export_pdf_enable);
-    set_input_control_status(hwnd, IDC_CLOSE_BUTTON, close_enable);
-    set_input_control_status(hwnd, IDC_AUTO_CLICK_CHECKBOX, auto_click_enable);
-
-    // プロパティコンボボックス群の有効/無効制御
-    set_input_control_status(hwnd, IDC_SCALE_COMBO, property_combobox_enable);
-    set_input_control_status(hwnd, IDC_QUALITY_COMBO, property_combobox_enable);
-    set_input_control_status(hwnd, IDC_PDF_SIZE_COMBO, property_combobox_enable);
-
-    // 自動クリックの設定が有効な場合、関連コントロールを有効化
-    if auto_click_enable {
-        update_auto_click_controls_state(hwnd);
-    } else {
-        set_input_control_status(hwnd, IDC_AUTO_CLICK_INTERVAL_COMBO, false);
-        set_input_control_status(hwnd, IDC_AUTO_CLICK_COUNT_EDIT, false);
-    }
-
-    // デバッグログ出力
-    println!("ボタン表示状態更新: エリア選択={}, キャプチャ={}, 参照(フォルダー選択)={}, PDF={}, 閉じる={}, 自動クリック={}", 
-            area_select_enable, capture_enable, browse_enable, export_pdf_enable, close_enable, auto_click_enable);
-}
-
 
 // オーナードローボタンの描画処理
 fn handle_draw_item(_hwnd: HWND, _wparam: WPARAM, lparam: LPARAM) {
@@ -743,10 +677,10 @@ fn handle_draw_item(_hwnd: HWND, _wparam: WPARAM, lparam: LPARAM) {
 */
 
 /// スケールコンボボックスを初期化（100%〜55%、5%刻み）
-/// 
+///
 /// # 引数
 /// * `hwnd` - ダイアログウィンドウハンドル
-/// 
+///
 /// # 機能
 /// 1. コンボボックスに選択肢（100, 95, 90, ..., 55）を追加
 /// 2. デフォルト値（65%）を選択状態に設定
@@ -755,29 +689,49 @@ fn initialize_scale_combo(hwnd: HWND) {
     if let Ok(combo_hwnd) = unsafe { GetDlgItem(Some(hwnd), IDC_SCALE_COMBO) } {
         // 55%から100%まで5%刻みで項目を追加
         let scales: Vec<u8> = (55..=100).step_by(5).collect();
-        
+
         for &scale in scales.iter().rev() {
             let text = format!("{}%\0", scale);
             let wide_text: Vec<u16> = text.encode_utf16().collect();
-            let index = unsafe { SendMessageW(combo_hwnd, CB_ADDSTRING, Some(WPARAM(0)), Some(LPARAM(wide_text.as_ptr() as isize))) }.0 as usize;
+            let index = unsafe {
+                SendMessageW(
+                    combo_hwnd,
+                    CB_ADDSTRING,
+                    Some(WPARAM(0)),
+                    Some(LPARAM(wide_text.as_ptr() as isize)),
+                )
+            }
+            .0 as usize;
             // 各項目に実際のスケール値をデータとして設定
-            unsafe { SendMessageW(combo_hwnd, CB_SETITEMDATA, Some(WPARAM(index)), Some(LPARAM(scale as isize))); }
+            unsafe {
+                SendMessageW(
+                    combo_hwnd,
+                    CB_SETITEMDATA,
+                    Some(WPARAM(index)),
+                    Some(LPARAM(scale as isize)),
+                );
+            }
         }
-        
+
         // デフォルト値（65%）を選択
         // 65%は (100-65)/5 = 7番目のインデックス（0ベース）
         let default_index = (100 - 65) / 5;
         unsafe {
-            SendMessageW(combo_hwnd, CB_SETCURSEL, Some(WPARAM(default_index as usize)), Some(LPARAM(0)));
+            SendMessageW(
+                combo_hwnd,
+                CB_SETCURSEL,
+                Some(WPARAM(default_index as usize)),
+                Some(LPARAM(0)),
+            );
         }
     }
 }
 
 /// スケールコンボボックス選択変更処理
-/// 
+///
 /// # 引数
 /// * `hwnd` - ダイアログウィンドウハンドル
-/// 
+///
 /// # 機能
 /// 1. 現在選択されている項目のインデックスを取得
 /// 2. インデックスからスケール値を計算（100, 95, 90, ..., 50）
@@ -785,16 +739,26 @@ fn initialize_scale_combo(hwnd: HWND) {
 fn handle_scale_combo_change(hwnd: HWND) {
     if let Ok(combo_hwnd) = unsafe { GetDlgItem(Some(hwnd), IDC_SCALE_COMBO) } {
         // 現在選択されているインデックスを取得
-        let selected_index = unsafe { SendMessageW(combo_hwnd, CB_GETCURSEL, Some(WPARAM(0)), Some(LPARAM(0))).0 } as i32;
-        
+        let selected_index =
+            unsafe { SendMessageW(combo_hwnd, CB_GETCURSEL, Some(WPARAM(0)), Some(LPARAM(0))).0 }
+                as i32;
+
         if selected_index >= 0 {
             // 選択された項目のデータを直接取得
-            let scale_value = unsafe { SendMessageW(combo_hwnd, CB_GETITEMDATA, Some(WPARAM(selected_index as usize)), Some(LPARAM(0))) }.0 as u8;
-            
+            let scale_value = unsafe {
+                SendMessageW(
+                    combo_hwnd,
+                    CB_GETITEMDATA,
+                    Some(WPARAM(selected_index as usize)),
+                    Some(LPARAM(0)),
+                )
+            }
+            .0 as u8;
+
             // AppStateに保存
             let app_state = AppState::get_app_state_mut();
             app_state.capture_scale_factor = scale_value as u8;
-            
+
             println!("スケール設定変更: {}%", scale_value);
         }
     }
@@ -807,10 +771,10 @@ JPEG品質コンボボックス・イベント処理
 */
 
 /// JPEG品質コンボボックスを初期化（100%〜70%、5%刻み）
-/// 
+///
 /// # 引数
 /// * `hwnd` - ダイアログウィンドウハンドル
-/// 
+///
 /// # 機能
 /// 1. コンボボックスに選択肢（100, 95, 90, 85, 80, 75, 70）を追加
 /// 2. デフォルト値（95%）を選択状態に設定
@@ -822,25 +786,45 @@ fn initialize_quality_combo(hwnd: HWND) {
         for &quality in qualities.iter().rev() {
             let text = format!("{}%\0", quality);
             let wide_text: Vec<u16> = text.encode_utf16().collect();
-            let index = unsafe { SendMessageW(combo_hwnd, CB_ADDSTRING, Some(WPARAM(0)), Some(LPARAM(wide_text.as_ptr() as isize))) }.0 as usize;
+            let index = unsafe {
+                SendMessageW(
+                    combo_hwnd,
+                    CB_ADDSTRING,
+                    Some(WPARAM(0)),
+                    Some(LPARAM(wide_text.as_ptr() as isize)),
+                )
+            }
+            .0 as usize;
             // 各項目に実際の品質値をデータとして設定
-            unsafe { SendMessageW(combo_hwnd, CB_SETITEMDATA, Some(WPARAM(index)), Some(LPARAM(quality as isize))); }
+            unsafe {
+                SendMessageW(
+                    combo_hwnd,
+                    CB_SETITEMDATA,
+                    Some(WPARAM(index)),
+                    Some(LPARAM(quality as isize)),
+                );
+            }
         }
-        
+
         // デフォルト値（95%）を選択
         // 95%は (100-95)/5 = 1番目のインデックス（0ベース）
         let default_index = (100 - 95) / 5;
         unsafe {
-            SendMessageW(combo_hwnd, CB_SETCURSEL, Some(WPARAM(default_index as usize)), Some(LPARAM(0)));
+            SendMessageW(
+                combo_hwnd,
+                CB_SETCURSEL,
+                Some(WPARAM(default_index as usize)),
+                Some(LPARAM(0)),
+            );
         }
     }
 }
 
 /// JPEG品質コンボボックス選択変更処理
-/// 
+///
 /// # 引数
 /// * `hwnd` - ダイアログウィンドウハンドル
-/// 
+///
 /// # 機能
 /// 1. 現在選択されている項目のインデックスを取得
 /// 2. インデックスから品質値を計算（100, 95, 90, ..., 70）
@@ -848,16 +832,26 @@ fn initialize_quality_combo(hwnd: HWND) {
 fn handle_quality_combo_change(hwnd: HWND) {
     if let Ok(combo_hwnd) = unsafe { GetDlgItem(Some(hwnd), IDC_QUALITY_COMBO) } {
         // 現在選択されているインデックスを取得
-        let selected_index = unsafe { SendMessageW(combo_hwnd, CB_GETCURSEL, Some(WPARAM(0)), Some(LPARAM(0))).0 } as i32;
-        
+        let selected_index =
+            unsafe { SendMessageW(combo_hwnd, CB_GETCURSEL, Some(WPARAM(0)), Some(LPARAM(0))).0 }
+                as i32;
+
         if selected_index >= 0 {
             // 選択された項目のデータを直接取得
-            let quality_value = unsafe { SendMessageW(combo_hwnd, CB_GETITEMDATA, Some(WPARAM(selected_index as usize)), Some(LPARAM(0))) }.0 as u8;
-            
+            let quality_value = unsafe {
+                SendMessageW(
+                    combo_hwnd,
+                    CB_GETITEMDATA,
+                    Some(WPARAM(selected_index as usize)),
+                    Some(LPARAM(0)),
+                )
+            }
+            .0 as u8;
+
             // AppStateに保存
             let app_state = AppState::get_app_state_mut();
             app_state.jpeg_quality = quality_value as u8;
-            
+
             println!("JPEG品質設定変更: {}%", quality_value);
         }
     }
@@ -870,10 +864,10 @@ PDFサイズコンボボックス・イベント処理
 */
 
 /// PDFサイズコンボボックスを初期化（20MB〜100MB、20MB刻み）
-/// 
+///
 /// # 引数
 /// * `hwnd` - ダイアログウィンドウハンドル
-/// 
+///
 /// # 機能
 /// 1. コンボボックスに選択肢（20, 40, 60, 80, 100）と「最大(1GB)」を追加
 /// 2. デフォルト値（20MB）を選択状態に設定
@@ -884,19 +878,53 @@ const PDF_FILE_SIZE_STEP_MB: u16 = 20;
 fn initialize_pdf_size_combo(hwnd: HWND) {
     if let Ok(combo_hwnd) = unsafe { GetDlgItem(Some(hwnd), IDC_PDF_SIZE_COMBO) } {
         // 20MBから100MBまで20MB刻みで項目を追加
-        for &size_mb in (PDF_FILE_MIN_SIZE_MB..=PDF_FILE_MAX_SIZE_MB).step_by(PDF_FILE_SIZE_STEP_MB as usize).collect::<Vec<u16>>().iter() {
+        for &size_mb in (PDF_FILE_MIN_SIZE_MB..=PDF_FILE_MAX_SIZE_MB)
+            .step_by(PDF_FILE_SIZE_STEP_MB as usize)
+            .collect::<Vec<u16>>()
+            .iter()
+        {
             let text = format!("{}MB\0", size_mb);
             let wide_text: Vec<u16> = text.encode_utf16().collect();
-            let index = unsafe { SendMessageW(combo_hwnd, CB_ADDSTRING, Some(WPARAM(0)), Some(LPARAM(wide_text.as_ptr() as isize))) }.0 as usize;
-            unsafe { SendMessageW(combo_hwnd, CB_SETITEMDATA, Some(WPARAM(index)), Some(LPARAM(size_mb as isize))); }
+            let index = unsafe {
+                SendMessageW(
+                    combo_hwnd,
+                    CB_ADDSTRING,
+                    Some(WPARAM(0)),
+                    Some(LPARAM(wide_text.as_ptr() as isize)),
+                )
+            }
+            .0 as usize;
+            unsafe {
+                SendMessageW(
+                    combo_hwnd,
+                    CB_SETITEMDATA,
+                    Some(WPARAM(index)),
+                    Some(LPARAM(size_mb as isize)),
+                );
+            }
         }
 
         // 無制限オプションを追加
         let unlimited_text = "最大(1GB)\0";
         let unlimited_wide: Vec<u16> = unlimited_text.encode_utf16().collect();
-        let index = unsafe { SendMessageW(combo_hwnd, CB_ADDSTRING, Some(WPARAM(0)), Some(LPARAM(unlimited_wide.as_ptr() as isize))) }.0 as usize;
+        let index = unsafe {
+            SendMessageW(
+                combo_hwnd,
+                CB_ADDSTRING,
+                Some(WPARAM(0)),
+                Some(LPARAM(unlimited_wide.as_ptr() as isize)),
+            )
+        }
+        .0 as usize;
         // 1GBをMB単位で設定
-        unsafe { SendMessageW(combo_hwnd, CB_SETITEMDATA, Some(WPARAM(index)), Some(LPARAM(1024))); }
+        unsafe {
+            SendMessageW(
+                combo_hwnd,
+                CB_SETITEMDATA,
+                Some(WPARAM(index)),
+                Some(LPARAM(1024)),
+            );
+        }
 
         // デフォルト値（20MB）を選択
         // 20MBは最初の項目（インデックス0）
@@ -907,10 +935,10 @@ fn initialize_pdf_size_combo(hwnd: HWND) {
 }
 
 /// PDFサイズコンボボックス選択変更処理
-/// 
+///
 /// # 引数
 /// * `hwnd` - ダイアログウィンドウハンドル
-/// 
+///
 /// # 機能
 /// 1. 現在選択されている項目のインデックスを取得
 /// 2. インデックスからサイズ値を計算（20MB刻み）
@@ -918,16 +946,26 @@ fn initialize_pdf_size_combo(hwnd: HWND) {
 fn handle_pdf_size_combo_change(hwnd: HWND) {
     if let Ok(combo_hwnd) = unsafe { GetDlgItem(Some(hwnd), IDC_PDF_SIZE_COMBO) } {
         // 現在選択されているインデックスを取得
-        let selected_index = unsafe { SendMessageW(combo_hwnd, CB_GETCURSEL, Some(WPARAM(0)), Some(LPARAM(0))).0 } as i32;
-        
+        let selected_index =
+            unsafe { SendMessageW(combo_hwnd, CB_GETCURSEL, Some(WPARAM(0)), Some(LPARAM(0))).0 }
+                as i32;
+
         if selected_index >= 0 {
             // 選択された項目のデータを直接取得
-            let size_value = unsafe { SendMessageW(combo_hwnd, CB_GETITEMDATA, Some(WPARAM(selected_index as usize)), Some(LPARAM(0))) }.0 as u16;
-            
+            let size_value = unsafe {
+                SendMessageW(
+                    combo_hwnd,
+                    CB_GETITEMDATA,
+                    Some(WPARAM(selected_index as usize)),
+                    Some(LPARAM(0)),
+                )
+            }
+            .0 as u16;
+
             // AppStateに保存
             let app_state = AppState::get_app_state_mut();
             app_state.pdf_max_size_mb = size_value as u16;
-            
+
             println!("PDFサイズ設定変更: {}MB", size_value);
         }
     }
@@ -952,7 +990,15 @@ fn initialize_auto_click_checkbox(hwnd: HWND) {
     unsafe {
         let app_state = AppState::get_app_state_ref();
         let is_checked = app_state.auto_clicker.is_enabled();
-        let _ = CheckDlgButton(hwnd, IDC_AUTO_CLICK_CHECKBOX, if is_checked { BST_CHECKED } else { BST_UNCHECKED });
+        let _ = CheckDlgButton(
+            hwnd,
+            IDC_AUTO_CLICK_CHECKBOX,
+            if is_checked {
+                BST_CHECKED
+            } else {
+                BST_UNCHECKED
+            },
+        );
 
         // 関連コントロールの有効/無効を初期状態で設定
         if let Ok(interval_combo) = GetDlgItem(Some(hwnd), IDC_AUTO_CLICK_INTERVAL_COMBO) {
@@ -983,26 +1029,12 @@ fn handle_auto_click_checkbox_change(hwnd: HWND) {
         if is_checked {
             app_state.auto_clicker.set_enabled(true);
             println!("✅連続クリックが有効になりました");
-
         } else {
             app_state.auto_clicker.set_enabled(false);
             println!("☐ 続クリックが無効になりました");
         }
 
         update_auto_click_controls_state(hwnd);
-
-    }
-}
-
-/// 連続クリック関連コントロールの有効/無効状態を更新
-fn update_auto_click_controls_state(hwnd: HWND) {
-    unsafe {
-        let app_state = AppState::get_app_state_ref();
-        let is_enabled =app_state.auto_clicker.is_enabled();
-
-        // 関連コントロールの有効/無効を切り替え
-        let _ = EnableWindow(GetDlgItem(Some(hwnd), IDC_AUTO_CLICK_INTERVAL_COMBO).unwrap(), is_enabled);
-        let _ = EnableWindow(GetDlgItem(Some(hwnd), IDC_AUTO_CLICK_COUNT_EDIT).unwrap(), is_enabled);
     }
 }
 
@@ -1019,12 +1051,27 @@ fn initialize_auto_click_interval_combo(hwnd: HWND) {
         for interval_sec in 1..=5u64 {
             let text = format!("{}秒\0", interval_sec);
             let wide_text: Vec<u16> = text.encode_utf16().collect();
-            let index = unsafe { SendMessageW(combo_hwnd, CB_ADDSTRING, Some(WPARAM(0)), Some(LPARAM(wide_text.as_ptr() as isize))) }.0 as usize;
-            unsafe { SendMessageW(combo_hwnd, CB_SETITEMDATA, Some(WPARAM(index)), Some(LPARAM((interval_sec * 1000) as isize))); }
+            let index = unsafe {
+                SendMessageW(
+                    combo_hwnd,
+                    CB_ADDSTRING,
+                    Some(WPARAM(0)),
+                    Some(LPARAM(wide_text.as_ptr() as isize)),
+                )
+            }
+            .0 as usize;
+            unsafe {
+                SendMessageW(
+                    combo_hwnd,
+                    CB_SETITEMDATA,
+                    Some(WPARAM(index)),
+                    Some(LPARAM((interval_sec * 1000) as isize)),
+                );
+            }
         }
 
         // デフォルト値（1秒）を選択
-        unsafe {    
+        unsafe {
             SendMessageW(combo_hwnd, CB_SETCURSEL, Some(WPARAM(0)), Some(LPARAM(0)));
         }
     }
@@ -1034,12 +1081,22 @@ fn initialize_auto_click_interval_combo(hwnd: HWND) {
 fn handle_auto_click_interval_combo_change(hwnd: HWND) {
     if let Ok(combo_hwnd) = unsafe { GetDlgItem(Some(hwnd), IDC_AUTO_CLICK_INTERVAL_COMBO) } {
         // 現在選択されているインデックスを取得
-        let selected_index = unsafe { SendMessageW(combo_hwnd, CB_GETCURSEL, Some(WPARAM(0)), Some(LPARAM(0))).0 } as i32;
-        
+        let selected_index =
+            unsafe { SendMessageW(combo_hwnd, CB_GETCURSEL, Some(WPARAM(0)), Some(LPARAM(0))).0 }
+                as i32;
+
         if selected_index >= 0 {
             // 選択された項目のデータを直接取得
-            let interval_value = unsafe { SendMessageW(combo_hwnd, CB_GETITEMDATA, Some(WPARAM(selected_index as usize)), Some(LPARAM(0))) }.0 as u64;
-            
+            let interval_value = unsafe {
+                SendMessageW(
+                    combo_hwnd,
+                    CB_GETITEMDATA,
+                    Some(WPARAM(selected_index as usize)),
+                    Some(LPARAM(0)),
+                )
+            }
+            .0 as u64;
+
             // AppStateに保存
             let app_state = AppState::get_app_state_mut();
             app_state.auto_clicker.set_interval(interval_value);
@@ -1065,45 +1122,13 @@ fn handle_auto_click_count_edit_change(hwnd: HWND) {
                 return; // テキストが空の場合は何もしない
             }
 
-            let text = String::from_utf16_lossy(&buffer[..text_length as usize]);      
+            let text = String::from_utf16_lossy(&buffer[..text_length as usize]);
             // 数値に変換
             if let Ok(count) = text.trim().parse::<u32>() {
                 let app_state = AppState::get_app_state_mut();
                 app_state.auto_clicker.set_max_count(count);
                 println!("自動クリック回数設定変更: {}", count);
-            }   
-        }
-    }
-}     
-
-
-// ダイアログを最小化
-pub fn bring_dialog_to_back() {
-    unsafe {
-        let app_state = AppState::get_app_state_ref();
-        if let Some(safe_hwnd) = app_state.dialog_hwnd {
-            let _ = ShowWindow(*safe_hwnd, SW_MINIMIZE);
-        }
-    }
-}
-
-// ダイアログを復元して最前面に移動
-pub fn bring_dialog_to_front() {
-    unsafe {
-        let app_state = AppState::get_app_state_ref();
-        if let Some(safe_hwnd) = app_state.dialog_hwnd {
-            // 最小化されている場合は復元
-            let _ = ShowWindow(*safe_hwnd, SW_RESTORE);
-            let _ = UpdateWindow(*safe_hwnd);
-
-            // 最前面に移動
-            let _ = SetWindowPos(
-                *safe_hwnd,
-                Some(HWND_TOP),
-                0, 0, 0, 0,
-                SWP_NOMOVE | SWP_NOSIZE,
-            );
-
+            }
         }
     }
 }

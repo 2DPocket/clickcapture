@@ -22,13 +22,13 @@ JPEGからPDF変換モジュール (export_pdf.rs)
 
 use crate::app_state::*;
 use crate::system_utils::app_log;
-use image::io::Reader as ImageReader;
 use image::GenericImageView;
-use lopdf::{Document, Object, Stream, Dictionary, ObjectId};
+use image::io::Reader as ImageReader;
+use lopdf::{Dictionary, Document, Object, ObjectId, Stream};
+use num_format::{Locale, ToFormattedString};
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::Path;
-use num_format::{Locale, ToFormattedString};
 
 // 削除：PDFサイズ制限はAppStateから取得するため定数は不要
 
@@ -49,12 +49,17 @@ impl PdfBuilder {
     }
 
     /// JPEGをページとして追加し、適切なXObjectリソース名を生成
-    fn add_jpeg_page(&mut self, jpeg_bytes: Vec<u8>, width: u32, height: u32) -> Result<(), Box<dyn std::error::Error>> {
+    fn add_jpeg_page(
+        &mut self,
+        jpeg_bytes: Vec<u8>,
+        width: u32,
+        height: u32,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         // JPEGサイズの事前検証
         if jpeg_bytes.is_empty() {
             return Err("空のJPEGデータが渡されました".into());
         }
-        
+
         if width == 0 || height == 0 {
             return Err(format!("無効な画像サイズ: {}x{}", width, height).into());
         }
@@ -68,11 +73,11 @@ impl PdfBuilder {
         xobject.set("ColorSpace", "DeviceRGB");
         xobject.set("BitsPerComponent", Object::Integer(8));
         xobject.set("Filter", "DCTDecode");
-        
+
         // 🔧 修正：元のJPEGデータを直接使用（追加圧縮なし・品質劣化なし）
         let stream = Stream::new(xobject, jpeg_bytes);
         // stream.compress() を削除 - JPEGは既に最適圧縮済み
-        
+
         let image_id = self.doc.add_object(stream);
 
         // ユニークなリソース名を生成（衝突回避）
@@ -105,12 +110,15 @@ impl PdfBuilder {
         // ページ辞書の作成
         let mut page = Dictionary::new();
         page.set("Type", "Page");
-        page.set("MediaBox", vec![
-            Object::Integer(0), 
-            Object::Integer(0), 
-            Object::Real(page_width), 
-            Object::Real(page_height)
-        ]);
+        page.set(
+            "MediaBox",
+            vec![
+                Object::Integer(0),
+                Object::Integer(0),
+                Object::Real(page_width),
+                Object::Real(page_height),
+            ],
+        );
         page.set("Resources", resources);
         page.set("Contents", contents_id);
 
@@ -223,16 +231,24 @@ pub fn export_selected_folder_to_pdf() -> Result<(), Box<dyn std::error::Error>>
     // AppStateからPDFサイズ上限を取得
     let app_state = AppState::get_app_state_ref();
     let max_pdf_size_bytes = (app_state.pdf_max_size_mb as u64) * 1024 * 1024;
-    println!("PDFサイズ上限: {} Byte", max_pdf_size_bytes.to_formatted_string(&Locale::ja));
+    println!(
+        "PDFサイズ上限: {} Byte",
+        max_pdf_size_bytes.to_formatted_string(&Locale::ja)
+    );
 
     for entry in entries {
         let path = entry.path();
-        let filename = path.file_name()
+        let filename = path
+            .file_name()
             .expect("ファイル名の取得に失敗しました")
-            .to_string_lossy().to_string();
-        
+            .to_string_lossy()
+            .to_string();
+
         total_processed += 1;
-        app_log(&format!("⏳ 処理中のJPEG: {} ({}/{})", filename, total_processed, total_files));
+        app_log(&format!(
+            "⏳ 処理中のJPEG: {} ({}/{})",
+            filename, total_processed, total_files
+        ));
 
         // JPEG画像情報を取得（エラーハンドリング強化）
         let img = match ImageReader::open(&path) {
@@ -250,29 +266,35 @@ pub fn export_selected_folder_to_pdf() -> Result<(), Box<dyn std::error::Error>>
         };
 
         let (width, height) = img.dimensions();
-        
+
         // ファイルサイズチェックと品質情報表示
         let jpeg_bytes = match fs::read(&path) {
             Ok(bytes) => {
                 // 🔧 追加：JPEG品質情報の表示
                 let file_size_mb = bytes.len() as f64 / 1024.0 / 1024.0;
                 let bytes_per_pixel = bytes.len() as f64 / (width * height) as f64;
-                
-                println!("  {} x {} px, {:.1}MB, {:.3}バイト/ピクセル", 
-                        width, height, file_size_mb, bytes_per_pixel);
-                
-                if bytes.len() > 50 * 1024 * 1024 { // 50MB以上の画像は警告
+
+                println!(
+                    "  {} x {} px, {:.1}MB, {:.3}バイト/ピクセル",
+                    width, height, file_size_mb, bytes_per_pixel
+                );
+
+                if bytes.len() > 50 * 1024 * 1024 {
+                    // 50MB以上の画像は警告
                     println!("⚠️ 警告: 大きな画像ファイル ({:.1}MB)", file_size_mb);
                 }
-                
+
                 if bytes_per_pixel < 0.1 {
-                    println!("⚠️ 警告: 低品質JPEG ({:.3}バイト/ピクセル)", bytes_per_pixel);
+                    println!(
+                        "⚠️ 警告: 低品質JPEG ({:.3}バイト/ピクセル)",
+                        bytes_per_pixel
+                    );
                 } else if bytes_per_pixel > 1.0 {
                     println!("✅ 高品質JPEG ({:.3}バイト/ピクセル)", bytes_per_pixel);
                 }
-                
+
                 bytes
-            },
+            }
             Err(e) => {
                 eprintln!("ファイル読み込みエラー ({}): {}", filename, e);
                 return Err(e.into());
@@ -284,9 +306,9 @@ pub fn export_selected_folder_to_pdf() -> Result<(), Box<dyn std::error::Error>>
             eprintln!("❌ PDF追加エラー ({}): {}", filename, e);
             return Err(e.into());
         }
-        
+
         files_in_current_pdf += 1;
-        
+
         // サイズチェック（メモリ効率を考慮してバッチ処理）
         if files_in_current_pdf % 10 == 0 || files_in_current_pdf > 1 {
             let estimated_size = match current_builder.estimate_size() {
@@ -297,35 +319,43 @@ pub fn export_selected_folder_to_pdf() -> Result<(), Box<dyn std::error::Error>>
                 }
             };
 
-            println!("推定PDFサイズ: {} Byte", estimated_size.to_formatted_string(&Locale::ja));
+            println!(
+                "推定PDFサイズ: {} Byte",
+                estimated_size.to_formatted_string(&Locale::ja)
+            );
 
             if estimated_size > max_pdf_size_bytes as usize && files_in_current_pdf > 1 {
-                app_log(&format!("➡️ PDFサイズ制限到達 ({:.1}MB)。現在のPDFを保存して新しいPDFを開始します。", 
-                        estimated_size as f64 / 1024.0 / 1024.0));
-                
+                app_log(&format!(
+                    "➡️ PDFサイズ制限到達 ({:.1}MB)。現在のPDFを保存して新しいPDFを開始します。",
+                    estimated_size as f64 / 1024.0 / 1024.0
+                ));
+
                 // 最後の画像を除いて現在のPDFを保存
                 current_builder.pages.pop(); // 最後の画像ページを削除
-                
+
                 if !current_builder.pages.is_empty() {
                     let output_path = Path::new(&folder).join(format!("{:04}.pdf", pdf_index));
                     match current_builder.save_to_file(&output_path) {
                         Ok(file_size) => {
-                            app_log(&format!("✅ PDF完了: {} ({:.1}MB)", 
-                                    output_path.display(), file_size as f64 / 1024.0 / 1024.0));
+                            app_log(&format!(
+                                "✅ PDF完了: {} ({:.1}MB)",
+                                output_path.display(),
+                                file_size as f64 / 1024.0 / 1024.0
+                            ));
                             pdf_index += 1;
-                        },
+                        }
                         Err(e) => {
                             eprintln!("❌ PDF保存エラー: {}", e);
-                            return Err(e);  
+                            return Err(e);
                         }
                     }
                 }
-                
+
                 // 新しいビルダーで現在の画像から開始
                 current_builder = PdfBuilder::new();
                 if let Err(e) = current_builder.add_jpeg_page(jpeg_bytes, width, height) {
                     eprintln!("❌ 新PDF開始エラー ({}): {}", filename, e);
-                    return Err(e);  
+                    return Err(e);
                 }
                 files_in_current_pdf = 1;
             }
@@ -337,9 +367,12 @@ pub fn export_selected_folder_to_pdf() -> Result<(), Box<dyn std::error::Error>>
         let output_path = Path::new(&folder).join(format!("{:04}.pdf", pdf_index));
         match current_builder.save_to_file(&output_path) {
             Ok(file_size) => {
-                app_log(&format!("✅ PDF完了: {} ({:.1}MB)", 
-                        output_path.display(), file_size as f64 / 1024.0 / 1024.0));
-            },
+                app_log(&format!(
+                    "✅ PDF完了: {} ({:.1}MB)",
+                    output_path.display(),
+                    file_size as f64 / 1024.0 / 1024.0
+                ));
+            }
             Err(e) => {
                 eprintln!("❌ 最終PDF保存エラー: {}", e);
                 return Err(e);
@@ -347,6 +380,9 @@ pub fn export_selected_folder_to_pdf() -> Result<(), Box<dyn std::error::Error>>
         }
     }
 
-    app_log(&format!("✅ 全JPEGからのPDF変換処理が完了しました。処理ファイル数: {}", total_processed));
+    app_log(&format!(
+        "✅ 全JPEGからのPDF変換処理が完了しました。処理ファイル数: {}",
+        total_processed
+    ));
     Ok(())
 }

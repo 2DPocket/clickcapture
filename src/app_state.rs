@@ -6,7 +6,7 @@
 【アーキテクチャ概要】
 アプリケーション全体の状態を統一的に管理する中核モジュール。
 高性能グローバル状態システム、完全スレッドセーフ設計、
-ゼロオーバーヘッドアクセスパターンによる最適化された状態管理を提供。
+ゼロオーバーヘッドアクセスパターンによる最適化された状態管理を提供する。
 
 【設計パターン・技術仕様】
 - 🏗️ シングルトン＋Registryパターン：OnceLock<SafeHWND>グローバル管理
@@ -86,10 +86,14 @@ use windows::Win32::{
     },
 };
 
-//use crate::{auto_click::AutoClicker,capturing_overlay::CapturingOverLay};
+// 連続自動クリック機能モジュール
 use crate::auto_click::AutoClicker;
-use crate::overlay::area_select_overlay::*;
+
+// キャプチャオーバーレイ
 use crate::overlay::capturing_overlay::*;
+
+// エリア選択オーバーレイ
+use crate::overlay::area_select_overlay::*;
 
 /*
 ============================================================================
@@ -98,22 +102,22 @@ use crate::overlay::capturing_overlay::*;
 */
 
 /// 【SafeHWND】WindowsウィンドウハンドルのスレッドセーフWrapper
-/// 
+///
 /// # 設計目的
 /// Windows HWND（ウィンドウハンドル）をマルチスレッド環境で安全に共有。
 /// Rustの標準型システムでは、Windows APIハンドルは Send/Sync 未実装のため、
 /// 明示的なunsafe実装により高性能スレッド間通信を実現。
-/// 
+///
 /// # 技術実装
 /// - 🎯 newtype pattern: HWND完全カプセル化・型安全性保証
 /// - 🚀 Send実装: スレッド間所有権移動・ゼロコストアブストラクション
 /// - 🔒 Sync実装: 複数スレッド同時参照・データ競合防止
 /// - ⚡ Deref実装: 透明アクセス・*safe_hwnd → HWND自動変換
-/// 
+///
 /// # 安全性保証
 /// Windows APIハンドルはプロセススコープ有効性・適切ライフタイム管理下で
 /// スレッド間共有が安全。HWNDの無効化はDestroyWindow明示呼び出しのみ。
-/// 
+///
 /// # 使用パターン
 /// - AppState内ハンドル保存・グローバル状態管理
 /// - オーバーレイ間ハンドル受け渡し・UI連携
@@ -134,22 +138,22 @@ impl Deref for SafeHWND {
 }
 
 /// 【SafeHHOOK】WindowsフックハンドルのスレッドセーフWrapper
-/// 
+///
 /// # 設計目的
 /// Windows HHOOK（フックハンドル）をマルチスレッド環境で安全に管理。
 /// SetWindowsHookExWで取得したシステムレベルフックを他スレッドから
 /// 操作可能にし、確実なリソース解放を保証。
-/// 
+///
 /// # 技術仕様
 /// - 🎯 グローバルフック: WH_MOUSE_LL/WH_KEYBOARD_LL全プロセス監視
 /// - 🔧 ハンドル管理: UnhookWindowsHookEx確実解放・リーク防止
 /// - 🚀 スレッド安全性: Windows APIレベル保証・データ競合なし
 /// - ⚡ 高速アクセス: CallNextHookEx直接呼び出し対応
-/// 
+///
 /// # リソースライフサイクル
 /// Install→Active Monitoring→Unhook→Handle Invalid
 /// 各段階でのメモリ安全性・エラーハンドリング完備
-/// 
+///
 /// # パフォーマンス特性
 /// - フック処理: <1ms応答時間・リアルタイム保証
 /// - メモリ使用: 固定8bytes・動的確保なし
@@ -176,25 +180,24 @@ impl Deref for SafeHHOOK {
 */
 
 /// 【AppState】アプリケーション状態統合管理構造体
-/// 
+///
 /// # アーキテクチャ設計
-/// - 🏗️ 集約ルートパターン: 全状態の一元化・整合性保証
-/// - 🎯 単一責任原則: 状態管理専門・副作用分離
-/// - 🚀 高性能アクセス: 直接ポインタ・O(1)操作・キャッシュ効率
-/// - 🔒 完全スレッドセーフ: 所有権管理・データ競合防止
-/// 
-/// # 状態カテゴリ（プロダクション分類）
-/// 1. 🎨 UI状態: ウィンドウハンドル群（5種類オーバーレイ管理）
-/// 2. 🔧 システム状態: フックハンドル群（マウス・キーボード監視）
-/// 3. 🎮 操作状態: モードフラグ群（選択・キャプチャ・ドラッグ）
-/// 4. 📍 座標状態: リアルタイム位置（マウス追跡・領域計算）
-/// 5. 💾 ファイル状態: 保存管理（自動連番・品質制御）
-/// 6. ⚙️ 設定状態: ユーザー設定（スケール・品質・PDF）
-/// 
+/// - **集約ルートパターン**: 全ての状態をこの構造体に一元化し、整合性を保証します。
+/// - **高性能アクセス**: `unsafe` を利用した直接ポインタアクセスにより、Mutexロックを回避し、ゼロオーバーヘッドでの状態アクセスを実現します。
+/// - **スレッドセーフ**: `Send` と `Sync` を実装したラッパー型 (`SafeHWND`, `SafeHHOOK`) を使用し、スレッド間での安全な状態共有を可能にします。
+///
+/// # 状態カテゴリ
+/// 1. **UIハンドル**: メインダイアログと各オーバーレイウィンドウのハンドルを管理します。
+/// 2. **システムフック**: マウスとキーボードのグローバルフックハンドルを保持します。
+/// 3. **操作モード**: `is_area_select_mode` や `is_capture_mode` などのフラグで、現在のアプリケーションの動作モードを制御します。
+/// 4. **座標と領域**: マウスのドラッグ操作や選択されたキャプチャ領域の座標を管理します。
+/// 5. **ファイルと設定**: 保存先フォルダ、ファイル連番、画質設定など、ユーザーが構成可能な項目を保持します。
+/// 6. **自動クリック**: `AutoClicker` 構造体を通じて、連続キャプチャ機能の状態を管理します。
+///
 /// # 他モジュール連携
-/// この構造体は全モジュールから参照される中心的データ構造。
-/// 各フィールド変更は対応UI/機能の即座状態同期を実現。
-/// React風宣言的UI更新パターンによる一貫性保証。
+/// この構造体は、アプリケーションの全てのモジュールから参照される中心的なデータハブです。
+/// `AppState::get_app_state_ref()` や `AppState::get_app_state_mut()` を通じて、
+/// どこからでも安全に状態の読み書きが可能です。
 #[derive(Debug)]
 pub struct AppState {
     // ===== 🎨 プロフェッショナルUI要素ハンドル管理 =====
@@ -202,17 +205,17 @@ pub struct AppState {
     /// - 機能: Win32ダイアログ・ユーザー操作受付・設定管理
     /// - 実装: main.rs DialogBoxParamW・リソース管理
     pub dialog_hwnd: Option<SafeHWND>,
-
-    /// エリア選択オーバーレイ
-    /// - 機能: 半透明の黒背景と、ドラッグでくり抜かれる選択範囲を描画
-    /// - 実装: area_select_overlay.rs
+ 
+    /// エリア選択オーバーレイ: ドラッグによる領域選択UIを提供
+    /// - 機能: 全画面を覆う半透明の黒背景と、ドラッグでくり抜かれる選択範囲を描画
+    /// - 実装: `area_select_overlay.rs`
     pub area_select_overlay: Option<AreaSelectOverLay>,
 
     /// キャプチャモードオーバーレイ
-    /// - 機能: マウスカーソルに追従し、キャプチャ待機中や処理中の状態を表示
-    /// - 実装: capturing_overlay.rs
+    /// - 機能: マウスカーソルに追従し、キャプチャ待機中や自動クリック処理中の状態を表示
+    /// - 実装: `capturing_overlay.rs`
     pub capturing_overlay: Option<CapturingOverLay>,
-    
+
     // ===== システムフック管理 =====
     // 低レベルマウスフック：システム全体のマウスイベント監視
     pub mouse_hook: Option<SafeHHOOK>,
@@ -268,10 +271,10 @@ pub struct AppState {
     pub capture_scale_factor: u8,
 
     /// JPEG画像保存品質設定（70%〜100%、5%刻み）
-    /// 
+    ///
     /// キャプチャした画像をJPEG形式で保存する際の圧縮品質を制御します。
     /// 値が高いほど画質が良くなりますが、ファイルサイズが大きくなります。
-    /// 
+    ///
     /// # 設定値の意味
     /// - 100: 最高画質（非圧縮に近い品質、ファイルサイズ大）
     /// - 95: 高画質（デフォルト、画質とサイズの最適バランス）※デフォルト
@@ -283,10 +286,10 @@ pub struct AppState {
     pub jpeg_quality: u8,
 
     /// PDFファイル最大サイズ設定（20MB〜100MB、20MB刻み）
-    /// 
+    ///
     /// PDF変換時の1つのPDFファイルの最大サイズを制御します。
     /// この値を超えた場合、新しいPDFファイルが作成されます。
-    /// 
+    ///
     /// # 設定値の意味
     /// - 20: 標準サイズ（デフォルト）※デフォルト
     /// - 40: やや大きめ
@@ -300,7 +303,7 @@ pub struct AppState {
     pub is_exporting_to_pdf: bool, // PDFエクスポート中フラグ
 
     // ===== 自動連続クリック機能 =====
-    pub auto_clicker: AutoClicker,      // 自動クリック機能管理
+    pub auto_clicker: AutoClicker, // 自動クリック機能管理
 }
 
 /*
@@ -367,12 +370,12 @@ impl AppState {
             SetWindowLongPtrW(hwnd, GWLP_USERDATA, app_state_ptr as isize);
         }
 
-        DIALOG_HWND.set(SafeHWND(hwnd))
+        DIALOG_HWND
+            .set(SafeHWND(hwnd))
             .expect("グローバルダイアログハンドルの設定に失敗しました。");
 
         println!("アプリケーション状態が初期化されました");
     }
-
 
     /// AppStateのクリーンアップ処理
     ///
@@ -382,7 +385,6 @@ impl AppState {
         unsafe {
             println!("アプリケーション状態をクリーンアップします...");
 
-            
             // ダイアログのユーザーデータからAppStateへのポインタを取得
             let app_state_ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut AppState;
             if !app_state_ptr.is_null() {
@@ -394,10 +396,8 @@ impl AppState {
                 // ポインタをクリアしてダングリングポインタを防止
                 SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
             }
-
         }
     }
-
 
     /// 【状態参照取得】HWNDからAppStateへの不変参照を取得
     //
@@ -417,7 +417,9 @@ impl AppState {
     //
     // 安全性：AppState生存期間はアプリケーション全体と同じ
     pub fn get_app_state_ref() -> &'static AppState {
-        let hwnd = DIALOG_HWND.get().expect("グローバルダイアログハンドルの取得に失敗しました。");
+        let hwnd = DIALOG_HWND
+            .get()
+            .expect("グローバルダイアログハンドルの取得に失敗しました。");
         unsafe {
             let ptr = GetWindowLongPtrW(**hwnd, GWLP_USERDATA) as *const AppState;
             &*ptr
@@ -444,14 +446,15 @@ impl AppState {
     // 注意：
     //   同時に複数の可変参照を作成しないよう呼び出し側で制御必要
     pub fn get_app_state_mut() -> &'static mut AppState {
-        let hwnd = DIALOG_HWND.get().expect("グローバルダイアログハンドルの取得に失敗しました。");
-        
+        let hwnd = DIALOG_HWND
+            .get()
+            .expect("グローバルダイアログハンドルの取得に失敗しました。");
+
         unsafe {
             let ptr = GetWindowLongPtrW(**hwnd, GWLP_USERDATA) as *mut AppState;
             &mut *ptr
         }
     }
-
 }
 
 impl Default for AppState {
@@ -484,12 +487,11 @@ impl Default for AppState {
             screen_height,
             capture_overlay_is_processing: false,
             capture_scale_factor: 65, // デフォルト65%（バランス良好）
-            jpeg_quality: 95, // デフォルト95%（高画質）
-            pdf_max_size_mb: 20, // デフォルト20MB
+            jpeg_quality: 95,         // デフォルト95%（高画質）
+            pdf_max_size_mb: 20,      // デフォルト20MB
             is_exporting_to_pdf: false,
             auto_clicker: AutoClicker::new(),
         }
-
     }
 }
 

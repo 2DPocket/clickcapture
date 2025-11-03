@@ -50,59 +50,59 @@ use windows::Win32::{
 // 画像処理ライブラリ（JPEGキャプチャ保存専用）
 use image::{ImageBuffer, Rgb};
 
-
 // ファイルシステム操作
 use std::fs;
 
 // システムフック管理モジュール
 use crate::hook::*;
 
+// UIユーティリティ群
+use crate::ui::bring_dialog::{bring_dialog_to_back, bring_dialog_to_front};
+use crate::ui::update_input_control_states::update_input_control_states;
+
 // アプリケーション状態管理構造体
 use crate::{app_state::*, overlay::Overlay};
 
 // ユーティリティ関数
 use crate::system_utils::*;
+
 // フォルダー管理機能
 use crate::folder_manager::*;
 
-
-
-use crate::{bring_dialog_to_back, bring_dialog_to_front, update_input_control_states};
-
 /**
  * キャプチャモードの開始/終了を切り替える中核制御関数
- * 
+ *
  * 【機能説明】
  * スクリーンキャプチャモードのON/OFF切り替えを行い、必要なシステムリソース
  * （キーボードフック）の管理とUI状態の同期を実行します。エリア選択の
  * 事前確認により、ユーザビリティとエラーハンドリングを両立させています。
- * 
+ *
  * 【状態遷移フロー】
  * [キャプチャモード OFF] → エリア選択確認 → [キャプチャモード ON]
  *                      ↓
  *           エラー表示 ←── (エリア未選択 or 自動クリック設定不正)
  *                      ↓
  *      フック開始 + UI更新 ←── (エリア選択済み and 設定正常)
- * 
+ *
  * [キャプチャモード ON] → フック停止 + UI更新 → [キャプチャモード OFF]
- * 
+ *
  * 【技術的詳細】
  * - モード切り替え：app_state.is_capture_mode フラグによる状態管理
  * - リソース管理：キーボードとマウスフックの install/uninstall
  * - エラーハンドリング：MessageBoxW による親切なユーザー通知
  * - UI同期：InvalidateRect による強制再描画でボタン状態を更新
- * 
+ *
  * 【前提条件】
  * - app_state.dialog_hwnd が有効に設定されていること
  * - エリア選択時：app_state.selected_area に有効な RECT が設定済み
- * 
+ *
  * 【副作用】
  * - キーボードとマウスフックの有効/無効化（システム全体への影響）
  * - 自動クリック処理中の場合、スレッドを停止させる
  * - AppState の is_capture_mode フラグ更新
  * - UI キャプチャボタンの表示状態変更
  * - コンソール出力によるデバッグ情報提供
- * 
+ *
  * 【AIおよび第三者解析用の技術ノート】
  * この関数は ユーザビリティとシステム安全性のバランスを重視した設計です。
  * エラー処理では技術的なメッセージではなく、具体的な操作手順を提示し、
@@ -115,19 +115,18 @@ pub fn toggle_capture_mode() {
     if is_capture_mode {
         // 【キャプチャモード終了処理】
         app_state.is_capture_mode = false;
-        
+
         // キーボードとマウスフック停止
-        uninstall_hooks();          
-        
+        uninstall_hooks();
+
         // キャプチャモードオーバーレイを非表示
         if let Some(overlay) = app_state.capturing_overlay.as_mut() {
             overlay.hide_overlay();
-            
         }
         //hide_tooltip_overlay();
 
         // メインダイアログを最前面に表示
-        bring_dialog_to_front(); 
+        bring_dialog_to_front();
 
         // キャプチャモード終了時に、自動クリック処理待機＆停止
         // WM_AUTO_CLICK_COMPLETE時も、これ呼ばれる。take()でthread_handleを開放する必要があるため
@@ -135,7 +134,6 @@ pub fn toggle_capture_mode() {
             app_state.auto_clicker.stop();
         }
         app_log("画面キャプチャモードを終了しました");
-        
     } else {
         // 【キャプチャモード開始前の前提条件チェック】
         let has_area = app_state.selected_area.is_some();
@@ -145,19 +143,21 @@ pub fn toggle_capture_mode() {
             app_log("❌ 先にエリア選択を行ってください");
 
             // ユーザーフレンドリーなエラーメッセージ表示
-            show_message_box("先にエリア選択を行ってください。\n\n操作手順:\n1. エリア選択ボタンをクリック\n2. 画面上でドラッグして範囲を選択\n3. キャプチャ開始ボタンをクリック",
+            show_message_box(
+                "先にエリア選択を行ってください。\n\n操作手順:\n1. エリア選択ボタンをクリック\n2. 画面上でドラッグして範囲を選択\n3. キャプチャ開始ボタンをクリック",
                 "エラー - エリア未選択",
                 MB_OK | MB_ICONWARNING,
             );
             return; // エラー時は早期リターンで後続処理をスキップ
-        
         }
 
         // 回数の値が0の場合、自動クリック機能を無効化
         if app_state.auto_clicker.is_enabled() && app_state.auto_clicker.get_max_count() == 0 {
-            show_message_box("回数の値が0、もしくは未設定です。1以上の値を設定してください。"
-                , "自動クリックエラー", 
-                MB_OK | MB_ICONWARNING);
+            show_message_box(
+                "回数の値が0、もしくは未設定です。1以上の値を設定してください。",
+                "自動クリックエラー",
+                MB_OK | MB_ICONWARNING,
+            );
             return; // エラー時は早期リターンで後続処理をスキップ
         }
 
@@ -169,17 +169,17 @@ pub fn toggle_capture_mode() {
 
         // キャプチャモードオーバーレイを表示
         if let Some(overlay) = app_state.capturing_overlay.as_mut() {
-            overlay.show_overlay();
-            
+            if let Err(e) = overlay.show_overlay() {
+                eprintln!("❌ キャプチャモードオーバーレイの表示に失敗: {:?}", e);
+                // エラー時はモードを開始せずに終了する
+            }
         }
 
         // メインダイアログを最背面に表示
-        bring_dialog_to_back(); 
+        bring_dialog_to_back();
 
-        app_log(
-            "画面キャプチャモードを開始しました (エスケープキーでキャプチャ終了)"
-        );
-        
+        app_log("画面キャプチャモードを開始しました (エスケープキーでキャプチャ終了)");
+
         // デバッグ用：選択エリア情報の出力
         // let rect = app_state.selected_area.unwrap();
         // app_log(&format!(
@@ -187,54 +187,52 @@ pub fn toggle_capture_mode() {
         //         rect.left, rect.top, rect.right, rect.bottom
         //     )
         // );
-
     };
     // 【UI同期処理】キャプチャボタンの視覚状態を強制更新
-    update_input_control_states();   // ダイアログボタン状態更新（UI整合性確保）
-
+    update_input_control_states(); // ダイアログボタン状態更新（UI整合性確保）
 }
 
 /**
  * 連番ファイル名を使用したスクリーンキャプチャ実行関数
- * 
+ *
  * 【機能説明】
  * 指定された画面矩形領域をキャプチャし、最適化されたJPEG画像として保存します。
  * ユーザー設定スケーリング、高品質アンチエイリアシング、自動連番ファイル名生成により、
  * 高速かつ軽量なスクリーンキャプチャを実現します。
- * 
+ *
  * 【パフォーマンス最適化戦略】
  * 1. ユーザー設定スケーリング：ファイルサイズ削減（55%-100%可変）
  * 2. HALFTONE モード：高品質な縮小処理で視覚品質維持
  * 3. メモリDC使用：GPU加速による高速ピクセル処理
  * 4. 適切なリソース管理：メモリリーク防止とパフォーマンス最適化
- * 
+ *
  * 【パラメータ】
  * left, top, right, bottom: スクリーン座標系での矩形領域（絶対座標）
- * 
+ *
  * 【戻り値】
  * Result<(), Box<dyn std::error::Error>>: 成功時OK、失敗時詳細エラー情報
- * 
+ *
  * 【処理フロー】
  * 画面DC取得 → メモリDC作成 → 領域コピー → スケーリング処理
  *     ↓
  * ピクセルデータ抽出 → BGR→RGB変換 → JPEG圧縮 → ファイル保存
  *     ↓
  * リソース解放 → 連番カウンタ更新 → 完了通知
- * 
+ *
  * 【ファイル命名規則】
  * 0001.jpg, 0002.jpg, ... (4桁ゼロパディング連番)
- * 
+ *
  * 【保存先決定ロジック】
  * 1. ユーザー指定フォルダー（app_state.selected_folder_path）
  * 2. 自動検出フォルダー（get_pictures_folder()）
  * 3. フォルダー自動作成（存在しない場合）
- * 
+ *
  * 【エラーハンドリング】
  * - ビットマップ作成失敗
  * - ピクセルデータ取得失敗  
  * - ファイル保存失敗
  * - フォルダー作成失敗
- * 
+ *
  * 【AIおよび第三者解析用の技術ノート】
  * この関数は Windows GDI APIの複雑さを抽象化し、安全なRustコードで
  * 高性能なスクリーンキャプチャを実現しています。メモリ管理、エラー処理、
@@ -248,7 +246,7 @@ pub fn capture_screen_area_with_counter() -> Result<(), Box<dyn std::error::Erro
         let app_state = AppState::get_app_state_mut();
 
         // 選択された領域を取得
-        let left ;
+        let left;
         let top;
         let right;
         let bottom;
@@ -261,7 +259,7 @@ pub fn capture_screen_area_with_counter() -> Result<(), Box<dyn std::error::Erro
                 bottom = selected_area.bottom;
             }
             None => {
-                return Err("キャプチャエリアが選択されていません".into());
+                return Err("❌ キャプチャエリアが選択されていません".into());
             }
         }
 
@@ -290,15 +288,21 @@ pub fn capture_screen_area_with_counter() -> Result<(), Box<dyn std::error::Erro
             overlay.hide_overlay(); // キャプチャアイコンを一時的に非表示
 
             let _ = BitBlt(
-                memory_dc,          // コピー先（メモリDC）
-                0, 0,               // コピー先座標
-                width, height,      // コピーサイズ
-                Some(screen_dc),    // コピー元（画面DC）
-                left, top,          // コピー元座標
-                SRCCOPY,            // コピーモード（上書き）
+                memory_dc, // コピー先（メモリDC）
+                0,
+                0, // コピー先座標
+                width,
+                height,          // コピーサイズ
+                Some(screen_dc), // コピー元（画面DC）
+                left,
+                top,     // コピー元座標
+                SRCCOPY, // コピーモード（上書き）
             );
-            
-            overlay.show_overlay(); // キャプチャアイコンを再表示
+
+            // キャプチャアイコン　表示状態に戻す
+            if let Err(e) = overlay.show_overlay() { 
+                return Err(format!("❌ キャプチャアイコンの再表示に失敗: {}", e).into());
+            }
         }
 
         // 【Step 5】スケーリング用デバイスコンテキストとビットマップの準備
@@ -308,17 +312,21 @@ pub fn capture_screen_area_with_counter() -> Result<(), Box<dyn std::error::Erro
 
         // 【Step 6】高品質スケーリングモードの設定
         let _ = SetStretchBltMode(scaled_dc, HALFTONE); // アンチエイリアシング有効
-        let _ = SetBrushOrgEx(scaled_dc, 0, 0, None);   // ブラシ原点設定
+        let _ = SetBrushOrgEx(scaled_dc, 0, 0, None); // ブラシ原点設定
 
         // 【Step 7】高品質縮小処理の実行
         let _ = StretchBlt(
-            scaled_dc,          // 縮小先DC
-            0, 0,               // 縮小先座標
-            scaled_width, scaled_height, // 縮小後サイズ
-            Some(memory_dc),    // 縮小元DC
-            0, 0,               // 縮小元座標
-            width, height,      // 縮小元サイズ
-            SRCCOPY,            // 転送モード
+            scaled_dc, // 縮小先DC
+            0,
+            0, // 縮小先座標
+            scaled_width,
+            scaled_height,   // 縮小後サイズ
+            Some(memory_dc), // 縮小元DC
+            0,
+            0, // 縮小元座標
+            width,
+            height,  // 縮小元サイズ
+            SRCCOPY, // 転送モード
         );
 
         // 【Step 8】ピクセルデータ抽出の準備
@@ -333,10 +341,10 @@ pub fn capture_screen_area_with_counter() -> Result<(), Box<dyn std::error::Erro
                 biWidth: scaled_width,
                 biHeight: -scaled_height, // 負値で上下反転防止（トップダウン形式）
                 biPlanes: 1,
-                biBitCount: 24,    // RGB 24bit カラー深度
+                biBitCount: 24,          // RGB 24bit カラー深度
                 biCompression: BI_RGB.0, // 無圧縮RGB
-                biSizeImage: 0,    // BI_RGB時は0で可
-                biXPelsPerMeter: 0, // 解像度情報（未使用）
+                biSizeImage: 0,          // BI_RGB時は0で可
+                biXPelsPerMeter: 0,      // 解像度情報（未使用）
                 biYPelsPerMeter: 0,
                 biClrUsed: 0,      // フルカラー使用
                 biClrImportant: 0, // 全色重要
@@ -346,23 +354,23 @@ pub fn capture_screen_area_with_counter() -> Result<(), Box<dyn std::error::Erro
 
         // 【Step 9】ビットマップからピクセルデータを抽出
         let result = GetDIBits(
-            scaled_dc,              // ソースDC
-            hbitmap_scaled,         // ソースビットマップ
-            0,                      // 開始スキャンライン
-            scaled_height as u32,   // スキャンライン数
+            scaled_dc,                               // ソースDC
+            hbitmap_scaled,                          // ソースビットマップ
+            0,                                       // 開始スキャンライン
+            scaled_height as u32,                    // スキャンライン数
             Some(pixel_data.as_mut_ptr() as *mut _), // 出力バッファ
-            &mut bitmap_info,       // ビットマップ情報
-            DIB_RGB_COLORS,         // カラーテーブル形式
+            &mut bitmap_info,                        // ビットマップ情報
+            DIB_RGB_COLORS,                          // カラーテーブル形式
         );
 
         // 【Step 10】Windows GDI リソースの適切な解放（メモリリーク防止）
-        let _ = SelectObject(memory_dc, old_bitmap);        // 元のビットマップを復元
-        let _ = SelectObject(scaled_dc, old_bitmap_scaled);  // 元のビットマップを復元
-        let _ = DeleteObject(hbitmap.into());               // 原寸ビットマップ削除
-        let _ = DeleteObject(hbitmap_scaled.into());        // 縮小ビットマップ削除
-        let _ = DeleteDC(memory_dc);                        // メモリDC削除
-        let _ = DeleteDC(scaled_dc);                        // スケーリングDC削除
-        let _ = ReleaseDC(None, screen_dc);                 // 画面DC解放
+        let _ = SelectObject(memory_dc, old_bitmap); // 元のビットマップを復元
+        let _ = SelectObject(scaled_dc, old_bitmap_scaled); // 元のビットマップを復元
+        let _ = DeleteObject(hbitmap.into()); // 原寸ビットマップ削除
+        let _ = DeleteObject(hbitmap_scaled.into()); // 縮小ビットマップ削除
+        let _ = DeleteDC(memory_dc); // メモリDC削除
+        let _ = DeleteDC(scaled_dc); // スケーリングDC削除
+        let _ = ReleaseDC(None, screen_dc); // 画面DC解放
 
         // ピクセルデータ取得成功確認
         if result == 0 {
@@ -379,13 +387,13 @@ pub fn capture_screen_area_with_counter() -> Result<(), Box<dyn std::error::Erro
         for y in 0..scaled_height {
             for x in 0..scaled_width {
                 let src_idx = (y * row_size + x * bytes_per_pixel) as usize;
-                
+
                 // 配列境界チェック（安全性確保）
                 if src_idx + 2 < pixel_data.len() {
                     // Windows GDI はBGR順なのでRGB順に変換
-                    let b = pixel_data[src_idx];        // Blue
-                    let g = pixel_data[src_idx + 1];    // Green  
-                    let r = pixel_data[src_idx + 2];    // Red
+                    let b = pixel_data[src_idx]; // Blue
+                    let g = pixel_data[src_idx + 1]; // Green  
+                    let r = pixel_data[src_idx + 2]; // Red
 
                     img_buffer.put_pixel(x as u32, y as u32, Rgb([r, g, b]));
                 }
@@ -416,7 +424,7 @@ pub fn capture_screen_area_with_counter() -> Result<(), Box<dyn std::error::Erro
         use image::codecs::jpeg::JpegEncoder;
         use std::fs::File;
         use std::io::BufWriter;
-        
+
         let save_result = (|| -> Result<(), Box<dyn std::error::Error>> {
             let output_file = File::create(&file_path)?;
             let mut writer = BufWriter::new(output_file);
@@ -430,7 +438,11 @@ pub fn capture_screen_area_with_counter() -> Result<(), Box<dyn std::error::Erro
                 // 成功通知とデバッグ情報出力
                 app_log(&format!(
                     "✅ 画像保存完了: {:04}.jpg ({}x{}) (scale: {}%, quality: {}%)",
-                    current_counter, scaled_width, scaled_height, app_state.capture_scale_factor, app_state.jpeg_quality
+                    current_counter,
+                    scaled_width,
+                    scaled_height,
+                    app_state.capture_scale_factor,
+                    app_state.jpeg_quality
                 ));
 
                 // 【Step 15】成功時のみ連番カウンタをインクリメント（失敗時は番号スキップを防止）
@@ -450,37 +462,36 @@ pub fn capture_screen_area_with_counter() -> Result<(), Box<dyn std::error::Erro
     }
 }
 
-
 /**
  * 🔄 キャプチャオーバーレイの状態切り替え関数
- * 
+ *
  * 【機能概要】
  * キャプチャ処理の状態（待機中/処理中）を`AppState`に保存し、
  * `capturing_overlay`に再描画を要求することで、表示を更新する。
- * 
+ *
  * 【技術実装】
  * - 状態保存: `app_state.capture_overlay_is_processing` フラグ更新
  * - UI更新: `overlay.refresh_overlay()` を呼び出してオーバーレイを再描画
- * 
+ *
  * 【状態遷移】
  * - is_processing=false（待機中）: 待機中アイコンが表示される
  * - is_processing=true（処理中）: 処理中アイコンが表示される
- * 
+ *
  * 【呼び出しコンテキスト】
  * - キャプチャ処理開始直前: `switch_capture_processing(true)`
  * - キャプチャ処理完了後: `switch_capture_processing(false)`
  */
 pub fn switch_capture_processing(is_processing: bool) {
     let app_state = AppState::get_app_state_mut();
-    
+
     // 状態フラグを更新
     app_state.capture_overlay_is_processing = is_processing;
-    
+
     // オーバーレイ更新
     if let Some(overlay) = app_state.capturing_overlay.as_mut() {
         overlay.refresh_overlay();
     }
-        
+
     if is_processing {
         println!("⌛ オーバーレイを「処理中」状態に更新しました");
     } else {

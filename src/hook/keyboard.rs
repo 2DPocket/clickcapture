@@ -72,10 +72,17 @@ use windows::Win32::{
 };
 
 // アプリケーション状態管理構造体
-use crate::{app_state::*, screen_capture::toggle_capture_mode, system_utils::app_log};
+use crate::app_state::*;
 
 // エリア選択モジュール
 use crate::area_select::*;
+
+// 画面キャプチャ管理関数
+use crate::screen_capture::*;
+
+// システムユーティリティ（ログ出力など）
+use crate::system_utils::app_log;
+
 
 /*
 ============================================================================
@@ -120,7 +127,7 @@ pub fn install_keyboard_hook() {
             0,                                             // スレッドID（0 = 全スレッド）
         );
 
-        if let Ok(hook) =  hook{
+        if let Ok(hook) = hook {
             app_state.keyboard_hook = Some(SafeHHOOK(hook));
             println!("キーボードフックを開始しました (エスケープキー監視)");
         } else {
