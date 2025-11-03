@@ -54,7 +54,9 @@ use image::{ImageBuffer, Rgb};
 // ファイルシステム操作
 use std::fs;
 
-use crate::mouse::{install_mouse_hook, uninstall_mouse_hook};
+// システムフック管理モジュール
+use crate::hook::*;
+
 // アプリケーション状態管理構造体
 use crate::{app_state::*, overlay::Overlay};
 
@@ -63,8 +65,6 @@ use crate::system_utils::*;
 // フォルダー管理機能
 use crate::folder_manager::*;
 
-// キーボードフック管理関数
-use crate::keyboard::*;
 
 
 use crate::{bring_dialog_to_back, bring_dialog_to_front, update_input_control_states};
@@ -115,8 +115,9 @@ pub fn toggle_capture_mode() {
     if is_capture_mode {
         // 【キャプチャモード終了処理】
         app_state.is_capture_mode = false;
-        uninstall_keyboard_hook(); // ESCキー監視を停止してシステムリソース解放
-        uninstall_mouse_hook();    // マウスフック停止（ドラッグ監視終了）
+        
+        // キーボードとマウスフック停止
+        uninstall_hooks();          
         
         // キャプチャモードオーバーレイを非表示
         if let Some(overlay) = app_state.capturing_overlay.as_mut() {
@@ -162,8 +163,9 @@ pub fn toggle_capture_mode() {
 
         // 【キャプチャモード開始処理】
         app_state.is_capture_mode = true;
-        install_keyboard_hook(); // ESCキー監視開始（緊急停止用）
-        install_mouse_hook();   // マウスフック開始（ドラッグ監視用）
+
+        // キーボードとマウスフック開始
+        install_hooks();
 
         // キャプチャモードオーバーレイを表示
         if let Some(overlay) = app_state.capturing_overlay.as_mut() {

@@ -52,13 +52,9 @@ use crate::app_state::*;
 
 use crate::bring_dialog_to_back;
 use crate::bring_dialog_to_front;
-// キーボードフック管理関数
-use crate::keyboard::*;
+// システムフック管理モジュール
+use crate::hook::*;
 
-
-
-use crate::mouse::install_mouse_hook;
-use crate::mouse::uninstall_mouse_hook;
 // オーバーレイ管理モジュール
 use crate::overlay::*;
 
@@ -129,9 +125,8 @@ pub fn start_area_select_mode() {
             app_state.is_area_select_mode = true;
             app_state.current_mouse_pos = current_pos; // 初期位置設定
 
-            // 【Step 3】システムフック開始（ESCキー緊急停止用）
-            install_keyboard_hook();
-            install_mouse_hook();
+            // 【Step 3】システムフック開始（ESCキー緊急停止用、マウスクリック）
+            install_hooks();
         }
 
         // 【Step 4】オーバーレイ作成
@@ -276,8 +271,7 @@ pub fn cancel_area_select_mode() {
     }
 
     // 【Step 3】システムリソースの解放
-    uninstall_keyboard_hook();          // ESCキー監視停止（システム負荷軽減）
-    uninstall_mouse_hook();             // マウスフック停止（ドラッグ監視終了）
+    uninstall_hooks();                  // キーボードとマウスフック停止
     update_input_control_states();      // ダイアログボタン状態更新（UI整合性確保）
 
     // 【Step 4】メインダイアログを最前面に表示

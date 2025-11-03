@@ -86,10 +86,10 @@ use windows::Win32::{
     },
 };
 
-use crate::{auto_click::AutoClicker, capturing_overlay::CapturingOverLay};
-
-use crate::area_select_overlay::*;
-
+//use crate::{auto_click::AutoClicker,capturing_overlay::CapturingOverLay};
+use crate::auto_click::AutoClicker;
+use crate::overlay::area_select_overlay::*;
+use crate::overlay::capturing_overlay::*;
 
 /*
 ============================================================================
