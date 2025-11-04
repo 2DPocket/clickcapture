@@ -241,7 +241,7 @@ use crate::ui::{
 ============================================================================
 */
 fn main() {
-    app_log("アプリケーションを開始します...");
+    println!("アプリケーションを開始します...");
 
     unsafe {
         // DPI対応を有効化
@@ -272,7 +272,7 @@ fn main() {
             eprintln!("GdiplusStartup failed with status: {:?}", status);
             return;
         }
-        app_log("✅ GDI+ を初期化しました。");
+        println!("✅ GDI+ を初期化しました。");
     }
 
     // メインダイアログの表示
@@ -282,7 +282,7 @@ fn main() {
     unsafe {
         let result = DialogBoxParamW(None, dialog_id, None, Some(dialog_proc), LPARAM(0));
         if result == -1 {
-            app_log("❌ ダイアログの作成に失敗しました。");
+            println!("❌ ダイアログの作成に失敗しました。");
         }
     }
 
@@ -290,7 +290,7 @@ fn main() {
     unsafe {
         GdiplusShutdown(gdiplus_token);
     }
-    app_log("アプリケーションを終了します。");
+    println!("アプリケーションを終了します。");
 }
 
 /*
