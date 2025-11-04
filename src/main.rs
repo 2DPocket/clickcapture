@@ -394,7 +394,7 @@ unsafe extern "system" fn dialog_proc(
                 IDC_CLOSE_BUTTON => {
                     // 1007 - 閉じるボタン
                     // ダイアログを終了
-                    cleanup_and_exit_dialog(hwnd);
+                    shutdown_application(hwnd);
                     return 1;
                 }
                 IDC_SCALE_COMBO => {
@@ -458,7 +458,7 @@ unsafe extern "system" fn dialog_proc(
 
         WM_CLOSE => {
             // ウィンドウの閉じるボタンが押された場合
-            cleanup_and_exit_dialog(hwnd);
+            shutdown_application(hwnd);
             return 1;
         }
         WM_DESTROY => {
@@ -482,8 +482,8 @@ unsafe extern "system" fn dialog_proc(
     0 // FALSE
 }
 
-/// アプリケーション終了時のクリーンアップ処理を行い、ダイアログを閉じる
-fn cleanup_and_exit_dialog(hwnd: HWND) {
+/// アプリケーション終了時のクリーンアップ処理を行い、ダイアログを閉じてアプリケーションを終了させる
+fn shutdown_application(hwnd: HWND) {
     app_log("ダイアログを終了しています...");
 
     // 各モードが有効な場合は、安全に終了させる

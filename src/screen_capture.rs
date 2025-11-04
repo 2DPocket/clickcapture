@@ -216,7 +216,7 @@ pub fn capture_screen_area_with_counter() -> Result<(), Box<dyn std::error::Erro
         }
 
         // キャプチャ処理開始時にオーバーレイアイコンを「処理中」に切り替え
-        switch_capture_processing(true);
+        set_capture_overlay_processing_state(true);
 
         // デバイスコンテキストの準備
         let screen_dc = GetDC(None);
@@ -326,7 +326,7 @@ pub fn capture_screen_area_with_counter() -> Result<(), Box<dyn std::error::Erro
         // ピクセルデータ取得成功確認
         if result == 0 {
             // エラー時にもアイコンを待機中に戻す
-            switch_capture_processing(false);
+            set_capture_overlay_processing_state(false);
             return Err("ビットマップデータの取得に失敗".into());
         }
 
@@ -399,13 +399,13 @@ pub fn capture_screen_area_with_counter() -> Result<(), Box<dyn std::error::Erro
                 app_state.capture_file_counter += 1;
 
                 // 処理成功時にアイコンを待機中に戻す
-                switch_capture_processing(false);
+                set_capture_overlay_processing_state(false);
 
                 Ok(()) // 全処理成功
             }
             Err(e) => {
                 // ファイル保存エラー時にもアイコンを待機中に戻す
-                switch_capture_processing(false);
+                set_capture_overlay_processing_state(false);
                 Err(e)
             }
         }
@@ -425,7 +425,7 @@ pub fn capture_screen_area_with_counter() -> Result<(), Box<dyn std::error::Erro
  * - `capture_screen_area_with_counter` の処理開始時に `true` で呼び出されます。
  * - `capture_screen_area_with_counter` の処理終了時に `false` で呼び出されます。
  */
-pub fn switch_capture_processing(is_processing: bool) {
+pub fn set_capture_overlay_processing_state(is_processing: bool) {
     let app_state = AppState::get_app_state_mut();
 
     // 状態フラグを更新
