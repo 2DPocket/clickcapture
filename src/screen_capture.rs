@@ -44,7 +44,7 @@ JPEG画像としての保存、連番ファイル名の生成、キャプチャ�
 ============================================================================
 */
 
-use windows::Win32::UI::WindowsAndMessaging::{MB_ICONWARNING, MB_OK};
+use windows::Win32::UI::WindowsAndMessaging::{IDOK, MB_ICONQUESTION, MB_ICONWARNING, MB_OK, MB_OKCANCEL};
 // 必要なライブラリ（外部機能）をインポート
 use windows::Win32::{
     Graphics::Gdi::*, // グラフィック描画機能
@@ -144,6 +144,28 @@ pub fn toggle_capture_mode() {
             );
             return;
         }
+
+
+        // 確認ダイアログを表示
+        if app_state.auto_clicker.is_enabled() {
+            let result = show_message_box(
+                "自動クリックモードでキャプチャを開始します。\n\n\
+                【開始方法】\n\
+                キャプチャしたい場所（例：「次へ」ボタン）を1回クリックしてください。\n\n\
+                【動作】\n\
+                設定された回数・間隔で、同じ場所へのクリックとキャプチャを自動で繰り返します。\n\n\
+                【停止方法】\n\
+                いつでも ESC キーで中断できます。",
+                "自動クリックモードの開始確認",
+                MB_OKCANCEL | MB_ICONQUESTION,
+            );
+
+            if result.0 != IDOK.0 {
+                app_log("自動クリックモードがキャンセルされました。");
+                return;
+            }
+        }
+
 
         // 前提条件をクリアしたので、モードを開始
         app_state.is_capture_mode = true;
