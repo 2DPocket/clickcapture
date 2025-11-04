@@ -5,38 +5,37 @@
 
 【ファイル概要】
 マウスドラッグによる画面領域選択機能を提供するモジュール。
-エリア選択モードの開始・終了、ドラッグ処理、オーバーレイ表示制御を管理し、`area_select_overlay.rs`と連携して
-直感的な領域選択UXを実現する。
+エリア選択モードの開始・終了、オーバーレイ表示制御を管理し、
+`area_select_overlay.rs` と連携して直感的な領域選択UXを実現します。
+実際のマウスイベント処理は `hook/mouse.rs` が担当します。
 
 【主要機能】
-1. エリア選択モード制御（start/cancel_area_select_mode）
-2. リアルタイムオーバーレイ表示（半透明の黒背景と、ドラッグ中のくり抜き矩形）
-3. ドラッグ処理（開始/更新/終了イベントハンドリング）
-4. 座標管理（POINT/RECT変換処理）
-5. 状態同期（AppStateとの連携）
+1.  **エリア選択モード制御 (`start_area_select_mode`, `cancel_area_select_mode`)**:
+    -   モードの開始/終了を管理し、関連リソース（フック、オーバーレイ）を制御します。
+2.  **領域確定処理 (`end_area_select_mode`)**:
+    -   ドラッグ操作で選択された矩形領域を `AppState` に保存します。
+3.  **オーバーレイ連携**:
+    -   `area_select_overlay` を表示/非表示にし、ユーザーに視覚的なフィードバックを提供します。
 
 【処理フロー】
-[エリア選択ボタン] → start_area_select_mode()
-                      ↓
-                 フック開始 + 全画面オーバーレイ表示
-                      ↓
-                 [マウスドラッグ開始] → is_dragging = true
-                      ↓
-                 [ドラッグ中] → オーバーレイ再描画（くり抜き矩形更新）
-                      ↓
-                 [ドラッグ終了] → end_area_select_mode() → 領域確定
-                      ↓
-                 [ESCキー or 完了] → cancel_area_select_mode() → リソース解放
-
-【オーバーレイ統合】
-`area_select_overlay.rs`と密接に連携。
-このモジュールがモードを開始し、`area_select_overlay`が実際の描画を担当する。
+1.  **[UI]** 「エリア選択」ボタンクリック
+2.  **`start_area_select_mode()`**:
+    -   `AppState` の `is_area_select_mode` を `true` に設定。
+    -   マウスとキーボードのフックをインストール (`install_hooks`)。
+    -   `area_select_overlay` を表示。
+3.  **[マウスフック]** `WM_LBUTTONDOWN` でドラッグ開始 (`is_dragging = true`)。
+4.  **[マウスフック]** `WM_MOUSEMOVE` でドラッグ中の矩形をオーバーレイに再描画。
+5.  **[マウスフック]** `WM_LBUTTONUP` で `end_area_select_mode()` を呼び出し。
+6.  **`end_area_select_mode()`**:
+    -   選択された `RECT` を `AppState` に保存。
+    -   `cancel_area_select_mode()` を呼び出してモードを終了。
+7.  **`cancel_area_select_mode()`** (完了またはESCキーでのキャンセル時):
+    -   フックをアンインストールし、オーバーレイを非表示にする。
 
 【技術仕様】
-- オーバーレイ：LayeredWindow による半透明描画
-- 座標系：スクリーン座標系での絶対位置管理
-- リアルタイム性：WM_MOUSEMOVE での即座の描画更新
-- 状態管理：AppState 経由での安全な状態共有
+-   **オーバーレイ**: `area_select_overlay` が `LayeredWindow` を使用して半透明描画。
+-   **イベント監視**: `WH_MOUSE_LL` と `WH_KEYBOARD_LL` フックを利用してシステム全体のマウス・キーボードイベントを監視。
+-   **状態管理**: `AppState` を介してモードフラグや選択領域を安全に共有。
 
 ============================================================================
 */
@@ -49,7 +48,7 @@ use windows::Win32::{
 // アプリケーション状態管理構造体
 use crate::app_state::*;
 
-use crate::ui::bring_dialog::*;
+use crate::ui::dialog_handlers::*;
 
 // システムフック管理モジュール
 use crate::hook::*;
@@ -62,65 +61,45 @@ use crate::system_utils::*;
 
 use crate::update_input_control_states;
 /**
- * エリア選択モードを開始する中核制御関数
+ * エリア選択モードを開始する
  *
- * 【機能説明】
- * マウスドラッグによる画面領域選択モードを開始し、必要な視覚効果と
- * システムフックを初期化します。重複起動防止、現在マウス位置の取得、
- * 二重オーバーレイ表示による直感的なUXを提供します。
+ * マウスドラッグによる画面領域選択モードを開始し、必要な視覚効果（オーバーレイ）と
+ * システムフック（マウス・キーボード）を初期化します。
  *
- * 【システム統合】
- * - キーボードフック：ESCキーによる緊急キャンセル機能
- * - マウスフック：ドラッグイベントの全画面監視（mouse.rsで管理）
- * - 状態管理：AppState経由での一元的な状態制御
+ * # 処理フロー
+ * 1. 重複起動をチェックし、モード中でなければ続行します。
+ * 2. `AppState` の `is_area_select_mode` フラグを `true` に設定します。
+ * 3. マウスとキーボードのグローバルフックをインストールします (`install_hooks`)。
+ * 4. `area_select_overlay` を表示し、全画面を半透明に覆います。
+ * 5. UIコントロールの状態を「エリア選択モード」に合わせて更新します。
+ * 6. メインダイアログを最小化し、画面操作の邪魔にならないようにします。
  *
- * 【処理フロー】
- * 1. 重複起動チェック
- * 2. AppStateのモードフラグを更新 (`is_area_select_mode = true`)
- * 3. キーボードとマウスのグローバルフックを開始
- * 4. `area_select_overlay` を表示
- * 5. UIコントロールの状態を更新
- * 6. メインダイアログを背面に移動
- * 7. ユーザーのドラッグ操作を待機
+ * # エラーハンドリング
+ * - 既にエリア選択モードの場合は、メッセージボックスを表示して処理を中断します。
+ * - オーバーレイの表示に失敗した場合は、モードを即座にキャンセルしてクリーンアップします。
  *
- * 【エラーハンドリング】
- * - 重複起動時：警告出力して早期リターン
- * - マウス位置取得失敗時：処理継続（GetCursorPos失敗は稀）
- * - フック失敗時：個別モジュールで処理（keyboard.rs/mouse.rs）
+ * # 副作用
+ * - システム全体のマウス・キーボードフックが有効になります。
+ * - 全画面を覆うオーバーレイウィンドウが表示されます。
+ * - `AppState` の `is_area_select_mode` フラグが `true` になります。
  *
- * 【前提条件】
- * - AppState が適切に初期化されていること
- * - システムが低レベルフック許可状態であること
- * - GDI リソースが利用可能であること
- *
- * 【副作用】
- * - システム全体のキーボードフック有効化
- * - 全画面オーバーレイウィンドウの作成
- * - AppState.is_area_select_mode フラグの更新
- *
- * 【AIおよび第三者解析用の技術ノート】
- * この関数は ユーザーエクスペリエンスとシステム安全性を両立させた
- * 設計です。視覚的フィードバックにより直感的な操作を可能にし、
- * 適切なエラーハンドリングでシステムの安定性を確保しています。
  */
 pub fn start_area_select_mode() {
     unsafe {
-        // 【Step 1】重複起動防止チェック
+        // 重複起動を防止
         let app_state = AppState::get_app_state_mut();
-        let is_area_select_mode = app_state.is_area_select_mode;
-
-        if is_area_select_mode {
+        if app_state.is_area_select_mode {
             show_message_box(
                 "既にエリア選択モード中です",
                 "エリア選択エラー",
                 MB_OK | MB_ICONERROR,
             );
-            return; // 重複起動を防止して安全性確保
+            return;
         }
 
         app_log("エリア選択モードを開始しました (エスケープキーでキャンセル可能)");
 
-        // 【Step 2】現在のマウス位置取得と状態初期化
+        // 現在のマウス位置を取得して状態を初期化
         let mut current_pos = POINT { x: 0, y: 0 };
         if GetCursorPos(&mut current_pos).is_ok() {
             println!("現在のマウス位置: ({}, {})", current_pos.x, current_pos.y);
@@ -129,11 +108,11 @@ pub fn start_area_select_mode() {
             app_state.is_area_select_mode = true;
             app_state.current_mouse_pos = current_pos; // 初期位置設定
 
-            // 【Step 3】システムフック開始（ESCキー緊急停止用、マウスクリック）
+            // システムフックを開始（ESCキーでのキャンセルとマウス操作の監視）
             install_hooks();
         }
 
-        // 【Step 4】オーバーレイ作成
+        // エリア選択用のオーバーレイを表示
         if let Some(overlay) = app_state.area_select_overlay.as_mut() {
             if let Err(e) = overlay.show_overlay() {
                 eprintln!("❌ エリア選択オーバーレイの表示に失敗: {:?}", e);
@@ -141,54 +120,28 @@ pub fn start_area_select_mode() {
             }
         }
 
-        // ダイアログボタン状態更新（UI整合性確保）
+        // UIコントロールの状態を更新
         update_input_control_states();
 
-        // 【Step 5】メインダイアログを最背面に表示
+        // メインダイアログを最小化
         bring_dialog_to_back();
-
-        // ユーザー操作待機状態へ遷移完了
     }
 }
 
 /**
- * エリア選択完了処理関数（領域確定版）
+ * エリア選択を完了し、選択領域を確定する
  *
- * 【機能説明】
- * ユーザーがマウスドラッグで選択した領域を確定し、AppStateに保存します。
- * 選択完了後は自動的にエリア選択モードを終了し、次のキャプチャ処理に
- * 備えた状態に遷移します。
+ * ユーザーがマウスドラッグで選択した領域を `AppState` に保存します。
+ * この関数は、ドラッグ操作が完了したとき（`WM_LBUTTONUP`）に `hook/mouse.rs` から呼び出されます。
+ * 処理完了後、`cancel_area_select_mode` を呼び出してモードを終了し、リソースを解放します。
  *
- * 【パラメータ】
- * rect: RECT - ドラッグで選択された矩形領域（スクリーン絶対座標）
- *              left, top: 選択開始点
- *              right, bottom: 選択終了点
+ * # 処理フロー
+ * 1. `AppState` からドラッグの開始点と終了点を取得し、正規化された `RECT` を作成します。
+ * 2. 作成した `RECT` を `AppState` の `selected_area` に保存します。
+ * 3. `cancel_area_select_mode` を呼び出して、クリーンアップ処理を実行します。
  *
- * 【処理フロー】
- * 選択領域デバッグ出力 → AppState.selected_area更新
- *                      ↓
- *                 cancel_area_select_mode()呼び出し
- *                      ↓
- *                 リソース解放とUI状態更新
- *
- * 【保存される状態】
- * app_state.selected_area に RECT 構造体を保存
- * - 後続のキャプチャ処理で参照される重要な状態
- * - toggle_capture_mode()での前提条件チェックに使用
- * - capture_screen_area_with_counter()での領域指定に使用
- *
- * 【デバッグサポート】
- * 選択された矩形の座標をコンソール出力し、開発時のトラブルシューティングと
- * 動作確認を支援します。
- *
- * 【呼び出し元】
- * mouse.rs の low_level_mouse_proc() 内 WM_LBUTTONUP 処理から呼び出されます。
- * ドラッグ操作完了時の自動処理として機能します。
- *
- * 【AIおよび第三者解析用の技術ノート】
- * この関数は 選択完了とモード終了を一体化した設計により、状態管理の
- * 一貫性を保ちます。cancel_area_select_mode()への委譲により、
- * コードの重複を避け、保守性を向上させています。
+ * # 保存される状態
+ * - `app_state.selected_area`: 後続のキャプチャ処理でこの領域が使用されます。
  */
 pub fn end_area_select_mode() {
     let app_state = AppState::get_app_state_mut();
@@ -209,56 +162,31 @@ pub fn end_area_select_mode() {
         bottom,
     };
 
-    // 選択完了のデバッグ情報出力
     app_log(&format!(
         "✅ エリア選択完了: ({}, {}) - ({}, {})",
         rect.left, rect.top, rect.right, rect.bottom
     ));
 
-    // 【重要】選択領域をAppStateに永続化
-    app_state.selected_area = Some(rect); // 後続キャプチャ処理で使用される
+    // 選択領域をAppStateに保存
+    app_state.selected_area = Some(rect);
 
-    // エリア選択モード終了処理に委譲（共通処理の再利用）
+    // 共通の終了処理を呼び出す
     cancel_area_select_mode();
 }
 
 /**
- * エリア選択モード終了処理関数（キャンセル・完了共通処理）
+ * エリア選択モードを終了（キャンセル）する
  *
- * 【機能説明】
- * エリア選択モードを安全に終了し、関連するシステムリソースを適切に解放します。
- * ESCキーによるキャンセル時と、選択完了時の両方で使用される共通終了処理です。
+ * エリア選択モードを安全に終了し、関連するシステムリソース（フック、オーバーレイ）を解放します。
+ * この関数は、領域選択が完了したとき (`end_area_select_mode` から) または
+ * ESCキーでキャンセルされたとき (`hook/keyboard.rs` から) に呼び出されます。
  *
- * 【リソース解放スコープ】
- * 1. AppState フラグ：is_area_select_mode, is_dragging の初期化
- * 2. 視覚オーバーレイ：`area_select_overlay`を非表示にする
- * 3. システムフック：キーボードとマウスのフックを停止
- * 4. UI状態：ボタンの有効/無効状態を更新
- * 5. ウィンドウZオーダー：メインダイアログを最前面に戻す
- *
- * 【安全性設計】
- * - 冪等性：複数回呼び出されても安全（重複解放防止）
- * - 状態整合性：関連する全フラグを確実に初期化
- * - リソースリーク防止：GDI/システムリソースの確実な解放
- *
- * 【処理順序の重要性】
- * 1. AppStateフラグ更新
- * 2. オーバーレイ非表示
- * 3. システムフック停止
- * 4. UIコントロール状態更新
- *
- * 【呼び出し元パターン】
- * - ESCキー押下時：keyboard.rs → handle_escape_key() → この関数
- * - 選択完了時：end_area_select_mode() → この関数
- * - エラー時終了：異常状態からの安全な復旧処理
- *
- * 【デバッグサポート】
- * 終了処理完了の明確な通知により、状態遷移の追跡を支援します。
- *
- * 【AIおよび第三者解析用の技術ノート】
- * この関数は RAII原則に基づいた設計で、リソース管理の安全性を最優先に
- * しています。エラー処理は個別モジュールに委譲し、この関数では
- * 確実な終了処理に専念する設計となっています。
+ * # クリーンアップ処理
+ * 1. `AppState` の `is_area_select_mode` と `is_dragging` フラグを `false` にリセットします。
+ * 2. `area_select_overlay` を非表示にします。
+ * 3. マウスとキーボードのフックをアンインストールします (`uninstall_hooks`)。
+ * 4. UIコントロールの状態を通常モードに戻します。
+ * 5. メインダイアログを復元し、最前面に表示します。
  */
 pub fn cancel_area_select_mode() {
     let app_state = AppState::get_app_state_mut();
@@ -266,23 +194,23 @@ pub fn cancel_area_select_mode() {
     // 【Step 1】AppState フラグの安全な初期化
     app_state.is_area_select_mode = false; // エリア選択モード終了
 
-    // ドラッグ中状態も確実にクリア（中断時の安全性確保）
+    // ドラッグ中だった場合もフラグをリセット
     if app_state.is_dragging {
         app_state.is_dragging = false;
     }
 
-    // 【Step 2】半透明背景オーバーレイを非表示化
+    // オーバーレイを非表示にする
     if let Some(overlay) = app_state.area_select_overlay.as_mut() {
         overlay.hide_overlay();
     }
 
-    // 【Step 3】システムリソースの解放
-    uninstall_hooks(); // キーボードとマウスフック停止
-    update_input_control_states(); // ダイアログボタン状態更新（UI整合性確保）
+    // システムフックを停止
+    uninstall_hooks();
+    // UIコントロールの状態を更新
+    update_input_control_states();
 
-    // 【Step 4】メインダイアログを最前面に表示
+    // メインダイアログを復元して最前面に表示
     bring_dialog_to_front();
 
-    // 終了処理完了の明確な通知
     println!("エリア選択モードを終了します");
 }

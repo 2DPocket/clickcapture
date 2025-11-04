@@ -1,23 +1,44 @@
 /*
 ============================================================================
-連続自動クリック機能モジュール (auto_click.rs)
+自動連続クリック機能モジュール (auto_click.rs)
 ============================================================================
 
 【機能概要】
-キャプチャモード中に指定間隔で現在のマウス位置にクリックイベントを
-自動発生させる連続クリック機能を提供
+キャプチャモード中に、指定された回数と間隔で自動的にマウスクリックを発生させ、
+連続的なスクリーンショット撮影を実現します。
+メインUIスレッドをブロックしないように、バックグラウンドスレッドで実行されます。
 
 【主要機能】
-1. 🖱️ 自動マウスクリック：SendInput APIによる物理クリック生成
-2. ⏱️ 間隔制御：1秒間隔（設定可能）での連続実行
-3. 🔄 スレッド管理：非同期実行・メインスレッド非ブロック
-4. 🛑 即座停止：キャプチャモード終了時の安全な停止
+1.  **`AutoClicker` 構造体**: 自動クリック機能の状態（有効/無効、間隔、回数など）を管理します。
+2.  **バックグラウンド実行**: `std::thread` を使用して、クリック処理を別スレッドで実行し、UIの応答性を維持します。
+3.  **安全なスレッド制御**:
+    -   `Arc<AtomicBool>` を使用した停止フラグにより、外部から安全にスレッドを停止させることができます。
+    -   `Drop` トレイトを実装し、`AutoClicker` インスタンスが破棄される際にスレッドが確実に終了するように保証します。
+4.  **メインスレッドへの通知**: 処理完了後、`PostMessageW` を使用してメインダイアログに非同期メッセージ (`WM_AUTO_CLICK_COMPLETE`) を送信し、後処理を促します。
 
 【技術仕様】
-- API使用：SendInput（物理マウスイベント生成）
-- スレッド：std::thread（バックグラウンド実行）
-- 同期制御：AtomicBool（スレッド間通信）
-- 座標取得：GetCursorPos（リアルタイム位置）
+-   **クリックシミュレーション**: `SendInput` API を使用して、物理的なマウスクリックイベントを生成します。
+-   **スレッド同期**: `Arc` と `Atomic*` 型（`AtomicBool`, `AtomicU32`）を使用して、スレッド間で安全に状態を共有・変更します。
+
+【処理フロー】
+1.  **[UI]** ユーザーが自動クリックを有効にし、キャプチャモードを開始します。
+2.  **[マウスフック]** ユーザーが画面を初めてクリックすると、`hook/mouse.rs` が `AutoClicker::start()` を呼び出します。
+3.  **`AutoClicker::start()`**:
+    -   停止フラグをリセットし、新しいバックグラウンドスレッドを生成します。
+    -   スレッド内で `auto_click_loop` 関数が実行されます。
+4.  **`auto_click_loop()`**:
+    -   指定された間隔で待機します。
+    -   `perform_mouse_click()` を呼び出して、`start`時に指定された座標でクリックをシミュレートします。
+    -   このシミュレートされたクリックは `hook/mouse.rs` に捕捉され、`capture_screen_area_with_counter()` が実行されます。
+    -   指定回数に達するか、停止フラグが立てられるまで上記を繰り返します。
+5.  **[ループ終了後]**:
+    -   `PostMessageW` でメインダイアログに `WM_AUTO_CLICK_COMPLETE` メッセージを送信します。
+6.  **[main.rs]**: `WM_AUTO_CLICK_COMPLETE` を受信し、キャプチャモードを終了するなどの後処理を実行します。
+
+【AI解析用：依存関係】
+- `hook/mouse.rs`: ユーザーの最初のクリックをトリガーとして `AutoClicker::start` を呼び出す。
+- `main.rs`: `WM_AUTO_CLICK_COMPLETE` メッセージを受信して後処理を行う。
+- `app_state.rs`: `AppState` に `AutoClicker` インスタンスを保持する。
 */
 
 use std::sync::Arc;
@@ -38,19 +59,19 @@ use crate::system_utils::{app_log, show_message_box};
 
 const MAX_CAPTURE_COUNT: u32 = 999; // 最大連続クリック数制限
 
-/// 自動連続クリック機能の状態と制御を管理する構造体
+/// 自動連続クリック機能の状態と制御を管理する
 #[derive(Debug)]
 pub struct AutoClicker {
-    enabled: bool,                                 // 連続クリック機能有効フラグ
-    stop_flag: Arc<AtomicBool>,                    // 停止フラグ（スレッド間共有）
-    interval_ms: u64,                              // クリック間隔（ミリ秒）
-    progress_count: Arc<AtomicU32>,                // 現在のクリック回数進捗
-    max_count: Arc<AtomicU32>,                     // 最大クリック回数設定
-    thread_handle: Option<thread::JoinHandle<()>>, // バックグラウンドスレッドハンドル
+    enabled: bool,                                 // 機能がUI上で有効かどうかのフラグ
+    stop_flag: Arc<AtomicBool>,                    // バックグラウンドスレッドを停止させるためのフラグ
+    interval_ms: u64,                              // クリック実行間隔（ミリ秒）
+    progress_count: Arc<AtomicU32>,                // 現在の実行回数
+    max_count: Arc<AtomicU32>,                     // 設定された最大実行回数
+    thread_handle: Option<thread::JoinHandle<()>>, // バックグラウンドスレッドのハンドル
 }
 
 impl AutoClicker {
-    /// 新しい連続クリッカーを作成
+    /// `AutoClicker` の新しいインスタンスをデフォルト値で作成する
     pub fn new() -> Self {
         Self {
             enabled: false,
@@ -62,48 +83,51 @@ impl AutoClicker {
         }
     }
 
-    /// `enabled`フィールドのゲッター
+    /// 機能が有効化されているかを取得する
     pub fn is_enabled(&self) -> bool {
         self.enabled
     }
 
-    /// `enabled`フィールドのセッター
+    /// 機能の有効/無効を設定する
     pub fn set_enabled(&mut self, enabled: bool) {
         self.enabled = enabled;
     }
 
-    /// スレッドが実行中か確認するゲッター
+    /// バックグラウンドスレッドが実行中かを確認する
     pub fn is_running(&self) -> bool {
         self.thread_handle.is_some()
     }
 
-    /// 間隔を更新するセッター
+    /// クリック間隔（ミリ秒）を設定する
     pub fn set_interval(&mut self, interval_ms: u64) {
         self.interval_ms = interval_ms;
     }
 
-    /// 現在の進捗カウントのゲッター
+    /// 現在の実行回数を取得する
     pub fn get_progress_count(&self) -> u32 {
         self.progress_count.load(Ordering::Relaxed)
     }
 
-    // 最大数を更新するセッター
+    /// 最大実行回数を設定する
     pub fn set_max_count(&mut self, count: u32) {
         self.max_count.store(count, Ordering::Relaxed);
     }
 
-    /// 最大数のゲッター
+    /// 設定された最大実行回数を取得する
     pub fn get_max_count(&self) -> u32 {
         self.max_count.load(Ordering::Relaxed)
     }
 
-    /// 連続クリックを開始
+    /// 自動連続クリック処理をバックグラウンドスレッドで開始する
+    ///
+    /// # 引数
+    /// * `position` - クリックをシミュレートする画面上の座標。
     pub fn start(&mut self, position: POINT) -> Result<(), String> {
         if self.thread_handle.is_some() {
             return Err("連続クリックは既に開始されています".to_string());
         }
 
-        // 停止フラグをリセット
+        // スレッドを開始する前に停止フラグをリセット
         self.stop_flag.store(false, Ordering::Relaxed);
         let stop_flag = Arc::clone(&self.stop_flag);
 
@@ -129,7 +153,7 @@ impl AutoClicker {
         Ok(())
     }
 
-    /// 連続クリックを停止
+    /// 実行中の自動連続クリック処理を安全に停止する
     pub fn stop(&mut self) {
         if self.stop_flag.load(Ordering::Relaxed) {
             return; // 既に停止している場合は何もしない
@@ -147,12 +171,20 @@ impl AutoClicker {
 }
 
 impl Drop for AutoClicker {
+    /// `AutoClicker` インスタンスが破棄される際に、実行中のスレッドを確実に停止させる
     fn drop(&mut self) {
         self.stop();
     }
 }
 
-/// 自動クリックをバックグラウンドで実行するループ関数
+/// 自動クリックをバックグラウンドで実行するループ処理
+///
+/// # 引数
+/// * `stop_flag` - ループを外部から停止させるためのフラグ。
+/// * `interval_ms` - クリックを実行する間隔（ミリ秒）。
+/// * `progress_count_boxed` - 実行回数をカウントするためのアトミックなカウンタ。
+/// * `max_count_boxed` - 実行回数の上限。
+/// * `position` - クリックをシミュレートする座標。
 fn auto_click_loop(
     stop_flag: Arc<AtomicBool>,
     interval_ms: u64,
@@ -173,13 +205,14 @@ fn auto_click_loop(
             .expect("キャプチャーオーバーレイが存在しません。");
         overlay.refresh_overlay();
 
-        // 指定間隔で待機（停止チェック付き）
-        // 100ms毎に停止フラグを確認しながらスリープ
-        let sleep_duration = Duration::from_millis(interval_ms); // 実際のスリープ時間    
-        let check_interval = Duration::from_millis(100); // 100ms毎に停止チェック
-        let mut remaining = sleep_duration; // 残り時間管理 
+        // 指定された間隔で待機する。
+        // ただし、長い待機時間中に停止要求があった場合に即座に応答できるよう、
+        // 100ミリ秒ごとに短いスリープを繰り返し、その都度停止フラグを確認する。
+        let sleep_duration = Duration::from_millis(interval_ms);
+        let check_interval = Duration::from_millis(100);
+        let mut remaining = sleep_duration;
 
-        // check_interval毎に停止フラグを確認しつつ実際のスリープ時間に達するまでスリープ
+        // `check_interval` ごとに停止フラグを確認しつつ、指定された `sleep_duration` に達するまで待機
         while remaining > Duration::from_millis(0) && !stop_flag.load(Ordering::Relaxed) {
             let sleep_time = remaining.min(check_interval);
             // 指定時間スリープ
@@ -187,14 +220,13 @@ fn auto_click_loop(
             remaining = remaining.saturating_sub(sleep_time);
         }
 
-        // 停止フラグが立っていればクリックをスキップしてループ終了
-        // （スリープ中に停止要求（エスケープキー）があった場合の即時対応）
+        // スリープ中に停止要求（例: ESCキー押下）があった場合、クリックを実行せずにループを抜ける
         if stop_flag.load(Ordering::Relaxed) {
             break;
         }
 
-        // 最大クリック数到達チェック
-        // キャプチャモード終了も兼ねる
+        // 最大クリック数に到達したかチェック
+        // `MAX_CAPTURE_COUNT` は暴走を防ぐための安全装置
         if progress_count >= MAX_CAPTURE_COUNT || progress_count >= max_count {
             if progress_count >= MAX_CAPTURE_COUNT {
                 show_message_box(
@@ -209,7 +241,7 @@ fn auto_click_loop(
             break;
         }
 
-        // 開始したマウス位置で連続クリック
+        // 実行回数をインクリメントし、クリックを実行
         progress_count += 1;
         app_log(&format!(
             "🖱️ 自動クリック実行: マウス位置({}, {}) {}/{}回目",
@@ -224,7 +256,7 @@ fn auto_click_loop(
         progress_count_boxed.store(progress_count, Ordering::Relaxed);
     }
 
-    // メインスレッドに処理完了を通知する
+    // ループ終了後、メインスレッドに処理完了を非同期で通知する
     let app_state = AppState::get_app_state_ref();
     if let Some(hwnd) = app_state.dialog_hwnd {
         unsafe {
@@ -237,7 +269,10 @@ fn auto_click_loop(
     }
 }
 
-/// SendInput APIを使用して、指定されたスクリーン座標でマウスクリック（左ボタンダウン→アップ）をシミュレートする
+/// `SendInput` APIを使用してマウスクリックをシミュレートする
+///
+/// 指定されたスクリーン座標で、マウスの左ボタンダウンと左ボタンアップの
+/// イベントを連続して発生させる。
 fn perform_mouse_click(position: POINT) -> Result<(), String> {
     unsafe {
         // マウス入力構造体を作成

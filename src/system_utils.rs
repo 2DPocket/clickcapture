@@ -1,41 +1,30 @@
 /*
- * system_utils.rs - システム統合ユーティリティモジュール
- *
- * このモジュールは、WindowsシステムAPIとの統合を管理し、以下の主要機能を提供します：
- *
- * 【主要機能概要】
- * 1. アプリケーションアイコン設定 - Win32リソースからのアイコン読み込みと設定
- * 2. システムカーソル制御 - キャプチャ中の砂時計カーソル表示
- * 3. 統合ログ表示 - コンソールとUIテキストボックスへの同期出力
- * 4. UI強制更新 - テキストボックスの即座の再描画制御
- *
- * 【RCリソース統合】
- * - アイコンリソース: resource.h/constants.rs同期管理
- * - 品質向上: JPEG 95%高品質設定への対応
- * - オーバーレイ統合: RCベースアイコンオーバーレイとの連携
- *
- * 【設計パターン】
- * - RAII原則: リソースの自動管理
- * - エラー処理: Rustの Result型を活用した安全な操作
- * - メモリ管理: Windows API用メモリの適切な解放
- * - 状態同期: AppState HWNDユーザーデータ経由の高速アクセス
- *
- * 【パフォーマンス考慮事項】
- * - システムカーソル変更の最小オーバーヘッド
- * - UI更新の効率的な制御
- * - ログ出力の双方向同期
- *
- * 【AIおよび第三者解析のための技術仕様】
- * - Windows API統合: windows crateを使用したモダンなRust-Windows相互運用
- * - エラーハンドリング: パニックを避けるための防御的プログラミング
- * - 状態管理: app_stateモジュールとの連携による一元的な状態更新
- * - UI統合: ダイアログボックスとの直接的な連携
- * - リソース管理: RCベースアーキテクチャとの統合設計
- *
- * 【フォルダー管理機能の分離】
- * フォルダー選択・管理機能は folder_manager.rs モジュールに分離されました。
- * - show_folder_dialog() → folder_manager::show_folder_dialog()
- * - get_pictures_folder() → folder_manager::get_pictures_folder()
+============================================================================
+システム統合ユーティリティモジュール (system_utils.rs)
+============================================================================
+
+【ファイル概要】
+WindowsシステムAPIとの連携を担う、アプリケーション全体で共通のヘルパー関数を
+提供するモジュールです。
+
+【主要機能】
+1.  **アプリケーションアイコン設定 (`set_application_icon`)**:
+    -   実行ファイルに埋め込まれたアイコンリソースを読み込み、メインダイアログのタイトルバーとタスクバーに設定します。
+2.  **統合ログ表示 (`app_log`)**:
+    -   メッセージをコンソール（デバッグ用）とUI上のログ表示ボックスの両方に同期して出力します。
+3.  **メッセージボックス表示 (`show_message_box`)**:
+    -   Windows標準のメッセージボックスを簡単に表示するためのラッパー関数。UTF-8からUTF-16への文字列変換を内部で処理します。
+
+【技術仕様】
+-   **API連携**: `LoadIconW`, `SendMessageW`, `MessageBoxW` などの基本的なWin32 APIを使用。
+-   **状態アクセス**: `AppState` からダイアログハンドル (`dialog_hwnd`) を取得してUIを操作。
+-   **文字列処理**: `encode_utf16` を使用して、Rustの `&str` をWindows APIが要求するUTF-16形式のワイド文字列に変換。
+
+【AI解析用：依存関係】
+- `app_state.rs`: ダイアログハンドルを取得するために使用。
+- `constants.rs`: `IDI_APP_ICON` などのリソースID定義。
+- `main.rs`: `WM_INITDIALOG` 内で `set_application_icon` を呼び出す。
+- プロジェクト内のほぼ全てのモジュール: ログ出力のために `app_log` を、ユーザーへの通知のために `show_message_box` を呼び出す。
  */
 
 use crate::{
@@ -56,43 +45,24 @@ use windows::{
 };
 
 /**
- * アプリケーションのウィンドウアイコンを設定する関数
+ * アプリケーションのウィンドウアイコンを設定する
  *
- * 【機能説明】
  * 実行ファイルに埋め込まれたリソースからアプリケーションアイコンを読み込み、
  * ダイアログウィンドウのタイトルバーとタスクバーに表示されるアイコンを設定します。
  *
- * 【技術的詳細】
- * - Win32 LoadIconW APIによるリソースアイコンの読み込み
- * - WM_SETICON メッセージによる大小両方のアイコン設定
- * - ICON_SMALL (16x16): タイトルバー用アイコン
- * - ICON_BIG (32x32): Alt+Tabおよびタスクバー用アイコン
+ * # 処理内容
+ * 1. `LoadIconW` APIを使用して、リソースID (`IDI_APP_ICON`) に基づいてアイコンを読み込みます。
+ * 2. `SendMessageW` APIと `WM_SETICON` メッセージを使用して、ウィンドウにアイコンを設定します。
+ *    - `ICON_BIG` (32x32): タスクバーやAlt+Tab切り替え画面で使用されます。
+ *    - `ICON_SMALL` (16x16): ウィンドウのタイトルバーで使用されます。
  *
- * 【リソース管理】
- * アイコンリソースは実行ファイル内に静的に埋め込まれているため、
- * 明示的な解放処理は不要です（システムが自動管理）。
- *
- * 【エラーハンドリング】
- * - モジュールハンドル取得失敗時: デフォルトハンドルで継続
- * - アイコン読み込み失敗時: 処理をスキップ（アプリケーション継続）
- * - ダイアログハンドル無効時: アクセス違反を回避するため事前チェック
- *
- * 【呼び出しタイミング】
- * ダイアログ初期化完了後、ウィンドウが表示される前に呼び出す必要があります。
- * app_state.dialog_hwndが有効に設定されていることが前提条件です。
- *
- * 【安全性注意事項】
- * この関数は unsafe として定義されていますが、実際の unsafe 操作は
- * Windows API呼び出しのみであり、適切な検証により安全性を確保しています。
- *
- * 【AIおよび第三者解析用の技術ノート】
- * Win32 GDI リソース管理の複雑さを隠蔽し、Rustの安全性モデルと
- * Windows APIの要求を適切にバランスさせた実装です。リソースIDは
- * constants.rsで一元管理され、ビルド時にembed-resourceで埋め込まれます。
+ * # リソース管理
+ * `LoadIconW` で読み込んだ標準アイコンリソースはシステムによって管理されるため、
+ * `DestroyIcon` などで明示的に解放する必要はありません。
  */
 pub fn set_application_icon() {
     unsafe {
-        // AppStateから有効なダイアログハンドルを取得
+        // AppStateからダイアログハンドルを取得
         let app_state = AppState::get_app_state_ref();
         let dialog_hwnd = app_state
             .dialog_hwnd
@@ -131,60 +101,36 @@ pub fn set_application_icon() {
 }
 
 /**
- * 統合ログ表示関数 - コンソールとUI両方に同期出力
+ * 統合ログ表示を行う
  *
- * 【機能説明】
- * アプリケーション全体で使用する統一ログ関数。メッセージを標準出力（コンソール）と
+ * メッセージを標準出力（コンソール）と
  * ダイアログのログ表示テキストボックス（IDC_LOG_EDIT）の両方に同時出力します。
  *
- * 【技術的詳細】
- * - println!: 標準出力への出力（デバッグ時のコンソール表示）
- * - SetWindowTextW: UIテキストボックスへの出力（ユーザー向け表示）
- * - UTF-16変換: Windows API要求に応じた文字列エンコード処理
- * - null終端: C形式文字列としての適切な終端処理
- *
- * 【エラーハンドリング】
- * - ダイアログハンドル無効時: コンソール出力のみ実行
- * - ログコントロール取得失敗時: コンソール出力のみ実行
- * - UI更新失敗時: 無視（アプリケーション継続性を重視）
- *
- * 【使用例】
+ * # 使用例
  * ```rust
  * app_log("キャプチャを開始しました");
  * app_log(&format!("画像を保存しました: {}", filename));
  * ```
- *
- * 【パフォーマンス考慮事項】
- * - UTF-16変換は必要時のみ実行（UI更新が可能な場合のみ）
- * - メモリ確保は一時的（関数スコープ内のみ）
- * - UI更新は非ブロッキング（失敗時もアプリケーション継続）
- *
- * 【AIおよび第三者解析用の技術ノート】
- * この関数により、アプリケーション全体のログ出力が一元化され、
- * デバッグ時のコンソール出力とユーザー向けUI表示の両方を同時に
- * サポートします。既存のprintln!呼び出しをこの関数で置き換えることで、
- * コンソールアプリケーションからGUIアプリケーションへの
- * シームレスな移行が可能です。
  */
 pub fn app_log(message: &str) {
-    // 【出力1】標準出力へのログ出力（デバッグ・開発用）
+    // 出力1: 標準出力へのログ出力（デバッグ・開発用）
     println!("{}", message);
 
-    // 【出力2】UIテキストボックスへの表示（ユーザー向け）
+    // 出力2: UIテキストボックスへの表示（ユーザー向け）
     unsafe {
         let app_state = AppState::get_app_state_ref();
 
         if let Some(dialog_hwnd) = app_state.dialog_hwnd {
             // ログ表示用テキストボックスコントロールを取得
             if let Ok(log_edit) = GetDlgItem(Some(*dialog_hwnd), IDC_LOG_EDIT) {
-                // UTF-8からUTF-16への変換（Windows API要求）
+                // UTF-8からUTF-16へ変換し、null終端を追加
                 let message_wide: Vec<u16> =
                     message.encode_utf16().chain(std::iter::once(0)).collect();
 
                 // テキストボックスにメッセージを設定（最新メッセージで上書き）
                 let _ = SetWindowTextW(log_edit, PCWSTR(message_wide.as_ptr()));
 
-                // 【重要】強制的な再描画を実行してUI更新を確実にする
+                // 強制的な再描画を実行してUI更新を確実にする
                 let _ = InvalidateRect(Some(log_edit), None, true); // コントロールを無効化
                 let _ = UpdateWindow(log_edit); // 即座に再描画を実行
             }
@@ -196,32 +142,18 @@ pub fn app_log(message: &str) {
 }
 
 /**
- * メッセージボックス表示関数
+ * Windows標準のメッセージボックスを表示する
  *
- * 【機能説明】
- * Windows標準のメッセージボックスを表示する共通関数。
- * UTF-8文字列からUTF-16への変換とnull終端処理を自動的に行います。
+ * この関数は、`MessageBoxW` APIのラッパーとして機能し、
+ * Rustの `&str` をAPIが要求するUTF-16形式に自動的に変換します。
  *
- * 【パラメータ】
- * - hwnd: 親ウィンドウハンドル
- * - message_text: 表示するメッセージテキスト（UTF-8）
- * - title_text: ウィンドウタイトル（UTF-8）
- * - style: メッセージボックスのスタイル（MB_OK | MB_ICONERROR等）
+ * # 引数
+ * * `message_text` - メッセージボックスに表示する本文。
+ * * `title_text` - メッセージボックスのタイトル。
+ * * `style` - メッセージボックスのスタイル（ボタンの種類やアイコンなど）。
  *
- * 【戻り値】
- * MESSAGEBOX_RESULT: ユーザーがクリックしたボタンの結果
- *
- * 【使用例】
- * ```rust
- * unsafe {
- *     show_message_box(
- *         hwnd,
- *         "エラーが発生しました",
- *         "エラー",
- *         MB_OK | MB_ICONERROR
- *     );
- * }
- * ```
+ * # 戻り値
+ * * `MESSAGEBOX_RESULT` - ユーザーがクリックしたボタンを示す値。
  */
 pub fn show_message_box(
     message_text: &str,
@@ -232,7 +164,7 @@ pub fn show_message_box(
         let app_state = AppState::get_app_state_ref();
 
         if let Some(hwnd) = app_state.dialog_hwnd {
-            // UTF-8からUTF-16への変換（null終端付き）
+            // UTF-8からUTF-16へ変換し、null終端を追加
             let message_wide: Vec<u16> = message_text
                 .encode_utf16()
                 .chain(std::iter::once(0))

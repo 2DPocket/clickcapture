@@ -1,57 +1,45 @@
 /*
 ============================================================================
-オーバーレイウィンドウ共通処理モジュール (overlay.rs)
+オーバーレイウィンドウ共通基盤モジュール (overlay.rs)
 ============================================================================
 
 【ファイル概要】
-アプリケーションで使用される全てのオーバーレイウィンドウ（例: エリア選択、キャプチャモード表示）
-の共通基盤を提供するモジュール。Win32 APIのLayered Window機能とGDI+を組み合わせ、
-高性能かつ透過的な描画を実現します。
+アプリケーションで使用される全てのオーバーレイウィンドウ（エリア選択、キャプチャモード表示など）の
+共通基盤を提供します。Win32 APIのLayered Window機能とGDI+を組み合わせ、
+ハードウェアアクセラレーションを利用した高性能かつ透過的な描画を実現します。
 
 【主要機能】
 1.  **`Overlay` トレイト**: 各オーバーレイウィンドウが実装すべき共通インターフェースを定義。
     -   ウィンドウの作成、表示、非表示、再描画、位置設定などの基本操作を抽象化。
 2.  **動的なウィンドウクラス登録と作成**:
-    -   オーバーレイの種類ごとにユニークなウィンドウクラスを登録し、Layered Windowを作成。
-    -   `WM_CREATE` メッセージで各オーバーレイ固有のプロシージャポインタをウィンドウに関連付け。
+    -   オーバーレイの種類ごとにユニークなウィンドウクラスを動的に登録し、Layered Windowを作成します。
 3.  **高性能な透過描画 (`paint_by_update_layered_window`)**:
-    -   `UpdateLayeredWindow` を使用し、ハードウェアアクセラレーションによる高速な透過描画を実現。
-    -   32bpp DIB (Device Independent Bitmap) をメモリDCに作成し、GDI+で描画後、一括で画面に転送。
-    -   アンチエイリアシング (`SmoothingModeAntiAlias`) を適用し、高品質な描画を提供。
+    -   `UpdateLayeredWindow` を使用し、ハードウェアアクセラレーションによる高速な透過描画を実現します。
+    -   オフスクリーン（メモリDC上）で32bpp DIBに描画後、その内容を一度に画面に転送することで、ちらつきのない滑らかな描画を可能にします。
 4.  **共通メッセージディスパッチ (`overlay_dispatch_proc`)**:
-    -   `WM_CREATE`, `WM_PAINT`, `WM_DESTROY` などの主要なウィンドウメッセージを処理。
-    -   各オーバーレイ固有の描画ロジックを呼び出すためのフックポイントを提供。
+    -   全てのオーバーレイウィンドウのメッセージを最初に受け取り、`WM_CREATE` で渡された各オーバーレイ固有の処理関数ポインタを `GWLP_USERDATA` に関連付けます。
+    -   `WM_PAINT` や `WM_DESTROY` などの後続メッセージでは、`GWLP_USERDATA` から関数ポインタを取得して、具体的な処理を委譲します。
 5.  **堅牢なリソース管理**:
-    -   ウィンドウ、ウィンドウクラス、GDI+オブジェクトなどのリソースを適切に作成・破棄。
-    -   `WM_DESTROY` 時に `Box::from_raw` を使用して、`WM_CREATE` でポインタ化した構造体の所有権を安全に回収し、メモリリークを防止。
+    -   `WM_DESTROY` 時に `Box::from_raw` を使用して、`WM_CREATE` でポインタ化した `OverlayWindowProc` 構造体の所有権を安全に回収し、メモリリークを防ぎます。
 
 【技術仕様】
 -   **設計パターン**:
-    -   **トレイトベースのポリモーフィズム**: `Overlay` トレイトにより、異なるオーバーレイが共通のインターフェースで扱える。
+    -   **トレイトによる抽象化**: `Overlay` トレイトにより、異なる種類のオーバーレイを統一されたインターフェースで操作できます。
     -   **RAII (Resource Acquisition Is Initialization)**: `WM_DESTROY` 処理での `Box::from_raw` によるリソースの安全な解放。
+-   **ウィンドウプロシージャの委譲**: `overlay_dispatch_proc` が汎用的なメッセージを処理し、具体的な描画ロジックは `OverlayWindowProc` に保持された関数ポインタに委譲します。
+-   **描画エンジン**: GDI+ on GDI (DIB Section)
+-   **ウィンドウタイプ**: `WS_EX_LAYERED` を使用したレイヤードウィンドウ。
 
-【処理フロー】
-1.  **オーバーレイ作成 (`create_overlay`)**:
-    -   `Overlay` トレイトを実装する構造体（例: `AreaSelectOverLay`）が `create_overlay()` を呼び出す。
-    -   ユニークなウィンドウクラスを登録し、`overlay_dispatch_proc` をウィンドウプロシージャとして設定。
-    -   `CreateWindowExW` で Layered Window を作成。この際、`OverlayWindowProc` のポインタを `lpCreateParams` として渡す。
-2.  **ウィンドウメッセージ処理 (`overlay_dispatch_proc`)**:
-    -   **`WM_CREATE`**: `lpCreateParams` から `OverlayWindowProc` のポインタを取得し、`GWLP_USERDATA` に保存。
-    -   **`WM_PAINT`**: `GWLP_USERDATA` から `OverlayWindowProc` を取得し、`paint_by_update_layered_window` を呼び出す。
-    -   **`WM_DESTROY`**: `GWLP_USERDATA` から `OverlayWindowProc` を取得し、`Box::from_raw` で所有権を回収してメモリを解放。
-3.  **描画処理 (`paint_by_update_layered_window`)**:
-    -   32bppのDIB SectionをメモリDCに作成。
-    -   このメモリDCからGDI+の `GpGraphics` オブジェクトを作成。
-    -   各オーバーレイ固有の `paint` 関数（例: `AreaSelectOverLay::overlay_window_paint`）を呼び出し、DIBに描画。
-    -   `UpdateLayeredWindow` を使用して、描画されたDIBの内容を透過的に画面に転送。
-    -   GDIリソースを解放。
+【AI解析用：依存関係】
+- `area_select_overlay.rs`, `capturing_overlay.rs`: このモジュールの `Overlay` トレイトを実装する具体的なオーバーレイ。
+- `app_state.rs`: 各オーバーレイのインスタンスを保持する。
 
 ============================================================================
 */
 
 /*
 ============================================================================
-サブモジュール宣言
+サブモジュール
 ============================================================================
 */
 pub mod area_select_overlay;
@@ -59,7 +47,7 @@ pub mod capturing_overlay;
 
 /*
 ============================================================================
-使用モジュール宣言
+インポート
 ============================================================================
 */
 use core::str;
@@ -86,16 +74,15 @@ use windows::{
 // アプリケーション状態管理構造体
 use crate::app_state::*;
 
-/// オーバーレイウィンドウプロシージャ構造体
-/// 各オーバーレイウィンドウのメッセージ処理関数ポインタを格納
-/// # フィールド
-/// - create: ウィンドウ作成時の初期化関数ポインタ
-/// - paint: ウィンドウ描画関数ポインタ
-/// - destroy: ウィンドウ破棄時のクリーンアップ関数ポインタ
+/// 各オーバーレイに固有のウィンドウプロシージャ処理を保持する構造体
 ///
+/// `overlay_dispatch_proc` から、具体的な処理を委譲するために使用される関数ポインタの集まり。
 pub struct OverlayWindowProc {
+    /// `WM_CREATE` メッセージで呼び出される初期化処理
     pub create: Option<fn(hwnd: HWND)>,
+    /// `WM_PAINT` メッセージで呼び出される描画処理
     pub paint: Option<fn(hwnd: HWND, graphics: *mut GpGraphics)>,
+    /// `WM_DESTROY` メッセージで呼び出されるクリーンアップ処理
     pub destroy: Option<fn(hwnd: HWND)>,
 }
 
@@ -156,31 +143,32 @@ impl Default for OverlayWindowClassParams {
     }
 }
 
+/// 全てのオーバーレイウィンドウが実装すべき共通の振る舞いを定義するトレイト
 pub trait Overlay {
-    /// HWND管理用セッター
+    /// 作成されたウィンドウのハンドルをインスタンスに保存する
     fn set_hwnd(&mut self, hwnd: Option<SafeHWND>);
 
-    /// HWND管理用ゲッター
+    /// 保存されているウィンドウハンドルを取得する
     fn get_hwnd(&self) -> Option<SafeHWND>;
 
-    /// オーバーレイクラス名取得
+    /// オーバーレイの種類を識別するためのユニークな名前を取得する
     fn get_overlay_name(&self) -> &str;
 
-    /// オーバーレイ説明文取得
+    /// デバッグログなどで使用する、オーバーレイの簡単な説明文を取得する
     fn get_description(&self) -> &str;
 
-    /// オーバーレイウィンドウ名取得
+    /// 作成されるウィンドウのタイトルバーに表示される名前を生成する
     fn get_windows_name(&self) -> String {
         format!("ClickCapture_{}_Windows", self.get_overlay_name())
     }
 
-    /// オーバーレイウィンドウパラメータ取得
+    /// `CreateWindowExW` に渡すウィンドウ作成パラメータを取得する
     fn get_window_params(&self) -> OverlayWindowParams;
 
-    /// オーバーレイウィンドウプロシージャ取得
+    /// このオーバーレイ固有のメッセージ処理関数群（`create`, `paint`, `destroy`）を取得する
     fn get_window_proc(&self) -> OverlayWindowProc;
 
-    /// オーバーレイクラス名取得
+    /// `RegisterClassExW` で登録するウィンドウクラスの名前を生成する
     fn get_class_name(&self) -> String {
         format!("ClickCapture_{}_Class", self.get_overlay_name())
     }
@@ -188,17 +176,12 @@ pub trait Overlay {
     /// オーバーレイクラスパラメータ取得
     fn get_class_params(&self) -> OverlayWindowClassParams;
 
-    /// オーバーレイウィンドウ表示制御
+    /// オーバーレイウィンドウを表示する
     ///
-    /// # 機能
-    /// - 既存オーバーレイチェック・新規作成
-    /// - 最前面表示（HWND_TOPMOST）
-    /// - 即座表示・ユーザーフィードバック
-    ///
-    /// # 処理フロー
-    /// 1. オーバーレイウィンドウ未作成時：create_overlay()実行
-    /// 2. ShowWindow(SW_SHOW)・即座表示
-    /// 3. set_window_pos・初期ウィンドウの位置調整
+    /// # 処理内容
+    /// 1. ウィンドウがまだ作成されていなければ `create_overlay` を呼び出して作成します。
+    /// 2. `ShowWindow` でウィンドウを表示状態にします。
+    /// 3. `refresh_overlay` と `set_window_pos` で、表示内容とZオーダーを最新の状態に更新します。
     fn show_overlay(&mut self) -> Result<(), Error> {
         let overlay_exists = self.get_hwnd().is_some();
 
@@ -221,7 +204,7 @@ pub trait Overlay {
         Ok(())
     }
 
-    // オーバーレイウィンドウの位置設定
+    /// オーバーレイウィンドウを最前面に配置する
     fn set_window_pos(&self) {
         if let Some(hwnd) = self.get_hwnd() {
             unsafe {
@@ -238,7 +221,7 @@ pub trait Overlay {
         }
     }
 
-    // オーバーレイ再描画要求
+    /// オーバーレイウィンドウの再描画を要求する
     fn refresh_overlay(&self) {
         unsafe {
             if let Some(hwnd) = self.get_hwnd() {
@@ -248,15 +231,9 @@ pub trait Overlay {
         }
     }
 
-    /// オーバーレイ高速非表示制御
+    /// オーバーレイウィンドウを非表示にする
     ///
-    /// # 効率設計
-    /// - ウィンドウ破棄なし・ShowWindow(SW_HIDE)のみ
-    /// - 再表示時：即座復帰・初期化不要
-    ///
-    /// # 使用場面
-    /// - モード切替時・状態変更
-    /// - ユーザー操作キャンセル時
+    /// ウィンドウを破棄せずに非表示にするだけなので、再表示が高速です。
     fn hide_overlay(&self) {
         if let Some(hwnd) = self.get_hwnd() {
             unsafe {
@@ -265,13 +242,12 @@ pub trait Overlay {
         }
     }
 
-    /// オーバーレイウィンドウ作成
+    /// オーバーレイウィンドウを作成する
     ///
-    /// # 処理フロー
-    /// 1. ウィンドウクラス登録（RegisterClassExW）
-    /// 2. ウィンドウ作成（`create_window`呼び出し）
-    /// 3. 成功時にHWNDを保存
-    ///
+    /// # 処理内容
+    /// 1. `RegisterClassExW` でウィンドウクラスを登録します（未登録の場合）。
+    /// 2. `create_window` を呼び出して、実際のウィンドウを作成します。
+    /// 3. 作成に成功したら、返された `HWND` をインスタンスに保存します。
     fn create_overlay(&mut self) -> Result<(), Error> {
         let class_name_wide: Vec<u16> = self
             .get_class_name()
@@ -337,7 +313,7 @@ pub trait Overlay {
         Ok(())
     }
 
-    /// オーバーレイウィンドウ作成
+    /// `CreateWindowExW` を呼び出してウィンドウを実際に作成する
     fn create_window(
         &self,
         hinstance: HMODULE,
@@ -346,7 +322,8 @@ pub trait Overlay {
     ) -> Result<HWND, Error> {
         let params = self.get_window_params();
 
-        // ウィンドウとSelfの関連付けを保存
+        // このオーバーレイ固有の処理関数群（`OverlayWindowProc`）をヒープに確保し、
+        // `CreateWindowExW` の `lpCreateParams` を介してウィンドウプロシージャに渡す。
         let boxed_overlay_window_proc = Box::new(self.get_window_proc());
         let boxed_overlay_window_proc_ptr =
             Box::into_raw(boxed_overlay_window_proc) as *mut std::ffi::c_void;
@@ -371,12 +348,11 @@ pub trait Overlay {
         overlay_result
     }
 
-    /// オーバーレイ完全クリーンアップ・リソース解放
+    /// オーバーレイウィンドウと関連リソースを完全にクリーンアップする
     ///
-    /// # 解放処理
-    /// 1. DestroyWindow：ウィンドウ破棄・OS通知
-    /// 2. UnregisterClassW：クラス登録解除・メモリ回収
-    ///
+    /// # 処理内容
+    /// 1. `DestroyWindow` を呼び出してウィンドウを破棄します。
+    /// 2. `UnregisterClassW` を呼び出してウィンドウクラスの登録を解除します。
     fn destroy_overlay(&self) {
         if let Some(hwnd) = self.get_hwnd() {
             unsafe {
@@ -407,16 +383,13 @@ pub trait Overlay {
     }
 }
 
-/// オーバーレイウィンドウプロシージャ・メッセージ処理
+/// 全てのオーバーレイウィンドウで共有される汎用ウィンドウプロシージャ
 ///
-/// # 処理メッセージ
-/// - WM_CREATE：初期化
-/// - WM_PAINT：描画処理
-/// - WM_DESTROY：クリーンアップ
-///
-/// # WM_PAINT詳細処理
-/// - paint_by_update_layered_window を呼び出し、UpdateLayeredWindowを使用した高速描画を行う
-///
+/// # メッセージ処理
+/// - **`WM_CREATE`**: `CreateWindowExW` の `lpCreateParams` から `OverlayWindowProc` のポインタを受け取り、ウィンドウのユーザーデータ (`GWLP_USERDATA`) に保存します。
+/// - **`WM_PAINT`**: `GWLP_USERDATA` から `OverlayWindowProc` を取得し、`paint_by_update_layered_window` を呼び出して、具体的な描画処理を委譲します。
+/// - **`WM_DESTROY`**: `GWLP_USERDATA` から `OverlayWindowProc` を取得し、`Box::from_raw` を使ってポインタの所有権を `Box` に戻します。これにより、`Box` がスコープを抜ける際にメモリが安全に解放されます。
+/// - **その他**: `DefWindowProcW` に処理を委譲します。
 extern "system" fn overlay_dispatch_proc(
     hwnd: HWND,
     msg: u32,
@@ -425,6 +398,7 @@ extern "system" fn overlay_dispatch_proc(
 ) -> LRESULT {
     match msg {
         WM_CREATE => {
+            // `CreateWindowExW` の `lpCreateParams` から `OverlayWindowProc` のポインタを取得
             let overlay_window_proc;
             let boxed_overlay_window_proc_ptr;
             unsafe {
@@ -438,13 +412,14 @@ extern "system" fn overlay_dispatch_proc(
                 create(hwnd);
             }
 
+            // ポインタをウィンドウのユーザーデータに保存して、後続のメッセージで利用できるようにする
             unsafe {
                 SetWindowLongPtrW(hwnd, GWLP_USERDATA, boxed_overlay_window_proc_ptr as isize);
             }
             LRESULT(0)
         }
         WM_PAINT => {
-            // 各オーバーレイウィンドウの描画処理を呼び出す
+            // ユーザーデータから `OverlayWindowProc` のポインタを取得
             let overlay_window_proc;
             unsafe {
                 let boxed_overlay_window_proc_ptr =
@@ -457,6 +432,7 @@ extern "system" fn overlay_dispatch_proc(
 
             let mut ps = PAINTSTRUCT::default();
             if let Some(paint) = overlay_window_proc.paint.as_ref() {
+                // `UpdateLayeredWindow` を使った描画処理を呼び出す
                 unsafe {
                     let hdc = BeginPaint(hwnd, &mut ps);
                     paint_by_update_layered_window(hwnd, hdc, paint);
@@ -467,7 +443,7 @@ extern "system" fn overlay_dispatch_proc(
             LRESULT(0)
         }
         WM_DESTROY => {
-            // クリーンアップ処理
+            // ユーザーデータから `OverlayWindowProc` のポインタを取得
             let overlay_window_proc;
             let boxed_overlay_window_proc_ptr;
             unsafe {
@@ -481,6 +457,8 @@ extern "system" fn overlay_dispatch_proc(
             }
 
             if !boxed_overlay_window_proc_ptr.is_null() {
+                // `WM_CREATE` で `Box::into_raw` によってポインタに変換された `OverlayWindowProc` の
+                // 所有権を `Box` に戻し、スコープを抜ける際にメモリを安全に解放する。
                 unsafe {
                     // WM_CREATEでBox::into_rawによってポインタに変換されたOverlayWindowProcの
                     // 所有権をBoxに戻し、スコープを抜ける際にメモリを安全に解放する。

@@ -4,32 +4,31 @@
 ============================================================================
 
 【ファイル概要】
-スクリーンショット保存先フォルダーの選択・管理・検証を一元的に担当するモジュール。
-Windowsシステムとの統合により、最適な保存先フォルダーの自動決定と
-ユーザーによる手動選択の両方をサポートします。
+スクリーンショットの保存先フォルダーの選択、自動決定、検証を一元的に担当するモジュール。
+Windows Shell APIと連携し、最適な保存先の自動検出と、ユーザーによる手動選択の両方をサポートします。
 
 【主要機能】
-1. フォルダー選択ダイアログ表示 - SHBrowseForFolderW APIによるネイティブUI
-2. 最適保存先フォルダー自動決定 - 優先順位付きフォールバック戦略
-3. 書き込み権限検証 - 実際のファイル作成による確実な権限チェック
-4. フォルダー候補管理 - OneDrive/ローカル環境の両方に対応
+1.  **フォルダー選択ダイアログ (`show_folder_dialog`)**:
+    -   `SHBrowseForFolderW` APIを利用して、ネイティブのフォルダー選択ダイアログを表示します。
+2.  **最適保存先の自動決定 (`get_pictures_folder`)**:
+    -   OneDrive上のピクチャフォルダ、ローカルのピクチャフォルダなどを優先順位に従って探索し、書き込み可能な最適なフォルダを自動で決定します。
+3.  **書き込み権限の検証 (`is_folder_writable`)**:
+    -   実際に一時ファイルを作成・削除することで、フォルダへの書き込み権限を確実にテストします。
 
 【設計原則】
-- フォールバック戦略: 複数候補からの安全な選択
-- 実用的検証: 理論ではなく実際の書き込みテスト
-- 国際化対応: 日本語版・英語版Windows両対応
-- エラー処理: 堅牢な例外処理でアプリケーション継続性を保証
+-   **フォールバック戦略**: 複数の候補から安全な保存先を選択する堅牢な設計。
+-   **実用的な検証**: ACL（アクセス制御リスト）の確認ではなく、実際のファイル書き込みテストによる確実な権限検証。
+-   **国際化対応**: 日本語版・英語版Windowsの両方で「ピクチャ」フォルダを正しく認識。
 
 【技術仕様】
-- Windows Shell API統合
-- COM環境の適切な管理
-- Unicode文字列処理（UTF-16 ↔ UTF-8）
-- RAII原則によるリソース管理
+-   **API連携**: Windows Shell API (`SHBrowseForFolderW`, `SHGetPathFromIDListW`) との統合。
+-   **COM初期化**: Shell APIの呼び出し前に `CoInitialize` を行い、適切に処理。
+-   **Unicode文字列処理**: `OsString::from_wide` を使用して、Windows APIが返すUTF-16文字列を安全に扱います。
 
 【AI解析用：依存関係】
-folder_manager.rs → app_state.rs (状態更新)
-folder_manager.rs → Windows Shell API
-folder_manager.rs ← main.rs (UI処理から呼び出し)
+- `app_state.rs`: ユーザーが選択したフォルダパスを `AppState` に保存。
+- `main.rs`: UI上の「参照」ボタンがクリックされた際に `show_folder_dialog` を呼び出す。
+- `initialize_controls.rs`: アプリケーション起動時に `get_pictures_folder` を呼び出してデフォルトの保存先を設定する。
 
 ============================================================================
 */
@@ -55,38 +54,29 @@ use windows::{
 };
 
 /**
- * フォルダー選択ダイアログを表示する関数
+ * フォルダー選択ダイアログを表示し、ユーザーが選択したパスを `AppState` に保存する
  *
- * 【機能説明】
- * Windows標準のSHBrowseForFolderW APIを使用してフォルダー選択ダイアログを表示し、
- * ユーザーが選択したフォルダーパスをアプリケーション状態に保存する。
+ * Windows標準の `SHBrowseForFolderW` APIを使用して、モダンなスタイルのフォルダー選択ダイアログを表示します。
+ * ユーザーがフォルダーを選択すると、そのパスを `AppState` とUI上のエディットボックスに反映させます。
  *
- * 【技術的詳細】
- * - COM環境の初期化と自動クリーンアップ
- * - BIF_NEWDIALOGSTYLEフラグによるモダンなダイアログ表示
- * - Unicode文字列の適切な変換処理（UTF-16 ↔ UTF-8）
- * - メモリ管理：CoTaskMemFreeによるShell API用メモリの適切な解放
+ * # 引数
+ * * `parent_hwnd` - ダイアログの親ウィンドウハンドル。ダイアログがモーダルで表示されます。
  *
- * 【パラメータ】
- * parent_hwnd: ダイアログの親ウィンドウハンドル（モーダル表示のため）
+ * # 処理フロー
+ * 1. COMライブラリを初期化します（Shell APIの前提条件）。
+ * 2. `BROWSEINFOW` 構造体を設定し、`SHBrowseForFolderW` を呼び出してダイアログを表示します。
+ * 3. ユーザーがフォルダーを選択した場合（キャンセルされなかった場合）:
+ *    a. 返されたPIDL（ポインタ）を `SHGetPathFromIDListW` でファイルシステムパスに変換します。
+ *    b. 変換したパスを `AppState` とUIのエディットボックスに設定します。
+ *    c. `CoTaskMemFree` を使用してPIDLが確保したメモリを解放します。
  *
- * 【状態更新】
- * - AppState.selected_folder_pathの更新
- * - UI制御ID 1002（パス表示テキストボックス）への反映
- *
- * 【エラーハンドリング】
- * - pidlがnullの場合（キャンセルまたは失敗）は何も実行しない
- * - パス変換失敗時は状態更新をスキップ
- * - UI更新失敗時は無視（アプリケーションの継続性を重視）
- *
- * 【AIおよび第三者解析用の技術ノート】
- * このfunctionは Windows Shell API の複雑さを隠蔽し、Rustの安全性を
- * 保ちながらネイティブWindows UIを提供する重要な統合ポイントです。
- * COM初期化とメモリ管理が正確に実装されており、メモリリークを防ぎます。
+ * # 安全性
+ * この関数は `unsafe` ブロックを含みますが、Win32 API呼び出しとポインタ操作は
+ * ドキュメントに従って安全に処理され、リソースは適切に解放されます。
  */
 pub fn show_folder_dialog(parent_hwnd: HWND) {
     unsafe {
-        // COM環境初期化 - Shell APIの前提条件
+        // COM環境を初期化（Shell APIの前提条件）
         let _ = CoInitialize(None);
 
         // BROWSEINFOW構造体の設定 - フォルダー選択ダイアログのパラメータ
@@ -95,17 +85,17 @@ pub fn show_folder_dialog(parent_hwnd: HWND) {
             .chain(std::iter::once(0))
             .collect();
         let mut browse_info = BROWSEINFOW {
-            hwndOwner: parent_hwnd,                       // 親ウィンドウ（モーダル表示用）
-            pidlRoot: ptr::null_mut(), // ルートフォルダー指定なし（全ドライブ表示）
-            pszDisplayName: windows::core::PWSTR::null(), // 表示名バッファ（未使用）
+            hwndOwner: parent_hwnd,
+            pidlRoot: ptr::null_mut(), // ルートはデスクトップ
+            pszDisplayName: windows::core::PWSTR::null(), // 選択されたフォルダ名を受け取るバッファ（今回は不要）
             lpszTitle: PCWSTR(title_wide.as_ptr()),
-            ulFlags: 0x00000040, // BIF_NEWDIALOGSTYLE - モダンなダイアログ表示
-            lpfn: None,          // コールバック関数なし
-            lParam: LPARAM(0),   // 追加パラメータなし
-            iImage: 0,           // アイコンインデックス
+            ulFlags: 0x00000040, // BIF_NEWDIALOGSTYLE: モダンなUIのダイアログを使用
+            lpfn: None,          // コールバック関数は使用しない
+            lParam: LPARAM(0),
+            iImage: 0,
         };
 
-        // フォルダー選択ダイアログ表示 - ユーザー操作待機
+        // フォルダー選択ダイアログを表示し、ユーザーの選択を待つ
         let pidl = SHBrowseForFolderW(&mut browse_info);
 
         // pidl有効性チェック - ユーザーがフォルダーを選択した場合のみ処理継続
@@ -113,28 +103,27 @@ pub fn show_folder_dialog(parent_hwnd: HWND) {
             // MAX_PATH サイズの Unicode文字列バッファ準備
             let mut path = [0u16; 260]; // Windows MAX_PATH定数
 
-            // PIDL（Item ID List）から実際のファイルシステムパスへ変換
+            // PIDL (Pointer to an Item ID List) から実際のファイルシステムパスへ変換
             if SHGetPathFromIDListW(pidl, &mut path).as_bool() {
                 // UTF-16からRust文字列への変換処理
                 let len = path.iter().position(|&c| c == 0).unwrap_or(path.len());
                 let path_os_string = OsString::from_wide(&path[..len]);
                 let path_string = path_os_string.to_string_lossy().to_string();
 
-                // アプリケーション状態への保存 - 一元的な状態管理
+                // AppStateとUIを更新
                 let app_state = AppState::get_app_state_mut();
                 app_state.selected_folder_path = Some(path_string.clone());
 
-                // UI更新 - パス表示テキストボックス（制御ID: 1002）への反映
                 if let Ok(path_edit) = GetDlgItem(Some(parent_hwnd), 1002) {
                     let _ = SetWindowTextW(path_edit, PCWSTR(path.as_ptr()));
                 }
             }
 
-            // Shell API用メモリの適切な解放 - メモリリーク防止
+            // Shell APIが確保したメモリを解放
             CoTaskMemFree(Some(pidl as *const _ as *const _));
         }
 
-        // COM環境のクリーンアップは自動的に行われる（Drop trait）
+        // CoInitializeに対するCoUninitializeは、このスレッドが終了する際に自動的に行われる思想だが、明示的に呼ぶのがより安全。今回は省略。
     }
 }
 
@@ -142,38 +131,22 @@ pub fn show_folder_dialog(parent_hwnd: HWND) {
  * 保存先フォルダーを決定する関数
  *
  * 【機能説明】
- * スクリーンショット保存に最適なフォルダーを自動的に決定します。
- * 複数の候補フォルダーを優先順位に従ってテストし、書き込み権限がある
- * 最初のフォルダーを選択する堅牢なフォールバック戦略を実装しています。
+ * スクリーンショットの保存に最適なフォルダーを自動的に決定します。
+ * 複数の候補フォルダーを優先順位に従ってテストし、書き込み権限がある最初のフォルダーを選択します。
+ * 最終的に見つかったパスに `\clickcapture` サブフォルダを追加して返します。
  *
- * 【アルゴリズム】
+ * # 処理フロー
  * 1. get_folder_candidates()から優先順位付きフォルダー候補を取得
- * 2. 各候補に対してis_folder_writable()で書き込み権限をテスト
+ * 2. 各候補に対して `is_folder_writable()` で書き込み権限をテスト
  * 3. 権限があるフォルダーが見つかった時点で即座にreturn
  * 4. 全候補で権限がない場合はC:\をフォールバックとして使用
  *
- * 【優先順位戦略】
- * OneDrive画像フォルダー > ローカル画像フォルダー > ドキュメント > デスクトップ
- * > 共通画像フォルダー > 共通ドキュメント > システムルート
- *
- * 【戻り値】
- * String: 書き込み権限がある有効なフォルダーパス（必ず有効なパスを返す）
- *
- * 【副作用】
- * - 標準出力にフォルダー選択プロセスのログを出力
- * - 必要に応じてフォルダーの作成を試行（is_folder_writable内で実行）
- *
- * 【AIおよび第三者解析用の技術ノート】
- * この関数は fail-safe設計を採用しており、どのような環境でも必ず
- * 有効なフォルダーパスを返します。優先順位は一般的なWindowsユーザーの
- * 使用パターンに基づいて最適化されており、OneDriveとローカルフォルダーの
- * 両方に対応しています。
+ * # 戻り値
+ * * `String` - 書き込み可能で、`\clickcapture` が付与されたフォルダーパス。
  */
 pub fn get_pictures_folder() -> String {
-    // 候補フォルダーリスト取得（優先順位順で整理済み）
     let folder_candidates = get_folder_candidates();
 
-    // 各候補フォルダーを書き込み権限テストで順次評価
     for folder_path in folder_candidates {
         if is_folder_writable(&folder_path) {
             app_log(&format!("選択されたフォルダー: {}", folder_path));
@@ -183,7 +156,7 @@ pub fn get_pictures_folder() -> String {
         }
     }
 
-    // フォールバック戦略 - 全候補で権限テストが失敗した場合の最終手段
+    // 全ての候補で書き込みに失敗した場合の最終フォールバック
     let fallback = "C:\\".to_string();
     app_log(&format!("フォールバック使用: {}", fallback));
     fallback
@@ -310,10 +283,10 @@ fn is_folder_writable(folder_path: &str) -> bool {
 
     match File::create(&test_file_path) {
         Ok(_) => {
-            // 【Step 4】テスト成功時のクリーンアップ
-            let _ = fs::remove_file(&test_file_path); // 削除失敗は無視（一時ファイルのため）
-            true // 書き込み権限確認完了
+            // テスト成功後、一時ファイルを削除
+            let _ = fs::remove_file(&test_file_path);
+            true
         }
-        Err(_) => false, // 書き込み権限なし（原因: ACL、ディスク容量、ネットワーク制限等）
+        Err(_) => false, // ファイル作成に失敗した場合は書き込み不可
     }
 }

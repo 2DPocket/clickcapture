@@ -4,40 +4,42 @@
 ============================================================================
 
 【ファイル概要】
-画面キャプチャ機能の中核モジュール。選択された領域の画面キャプチャ、
-JPEG画像保存、連番ファイル名生成、キャプチャモード制御、自動クリック連携を提供する。
+画面キャプチャ機能の中核を担うモジュールです。選択された領域のキャプチャ、
+JPEG画像としての保存、連番ファイル名の生成、キャプチャモードの制御、
+そして自動連続クリック機能との連携を提供します。
 
 【主要機能】
-1. キャプチャモード制御（toggle_capture_mode）
-2. キャプチャモードオーバーレイ管理（表示/非表示/更新）
-3. 画面領域キャプチャ（capture_screen_area_with_counter）
-4. JPEG画像保存（ユーザー設定品質70%〜100%で可変品質保存）
-5. 連番ファイル名生成（0001.jpg, 0002.jpg...）
-6. エラーハンドリング（領域未選択、保存失敗等）
-7. 自動連続クリック連携（指定回数・間隔での自動キャプチャ）
+1.  **キャプチャモード制御 (`toggle_capture_mode`)**:
+    -   キャプチャモードの開始と終了を切り替え、関連リソース（フック、オーバーレイ）を管理します。
+2.  **画面領域キャプチャと保存 (`capture_screen_area_with_counter`)**:
+    -   `BitBlt` APIを使用して指定領域のピクセルデータを高速に取得します。
+    -   取得したデータをユーザー設定のスケールと品質でJPEG画像としてエンコードし、保存します。
+3.  **連番ファイル名生成**:
+    -   保存するファイル名を `0001.jpg`, `0002.jpg` のように自動でインクリメントします。
+4.  **自動クリック連携**:
+    -   自動クリックモードが有効な場合、最初のクリックをトリガーに `auto_clicker` を起動し、連続キャプチャを実行します。
 
 【技術仕様】
-- 画面取得：GetDC + BitBlt による高速ピクセル取得
-- 画像処理：image crate による JPEG エンコード
-- ファイル保存：BufWriter による効率的な書き込み
-- 品質設定：JPEG ユーザー設定品質（70%〜100%）
-- スケール設定：ユーザー設定倍率（55%〜100%）
-- オーバーレイ：GDI+で描画される動的オーバーレイ
-- パフォーマンス：メモリ効率的な RGB バッファ処理
+-   **画面取得**: `GetDC` + `BitBlt` による高速なピクセルデータ取得。
+-   **画像処理**: `image` クレートによるJPEGエンコード。`StretchBlt` と `HALFTONE` モードによる高品質な画像縮小。
+-   **ファイルI/O**: `std::fs` と `std::io::BufWriter` による効率的なファイル書き込み。
+-   **オーバーレイ**: `capturing_overlay` を使用して、キャプチャ待機中や処理中の状態をユーザーにフィードバック。
 
 【処理フロー】
-[キャプチャボタン] → toggle_capture_mode() → エリア/自動クリック設定を検証
-                      ↓ (モード開始)
-              フック開始 + capturing_overlay.show_overlay()
-                      ↓
-              [画面内左クリック]
-                      ├─ (自動クリック有効) → auto_clicker.start() → 指定回数ループ
-                      │      ↓ (ループ内)
-                      │   capture_screen_area_with_counter() → JPEG保存 → 連番更新
-                      │      ↓
-                      │   [ループ完了] → toggle_capture_mode() → モード終了
-                      │
-                      └─ (自動クリック無効) → capture_screen_area_with_counter() → JPEG保存 → 連番更新
+1.  **[UI]** 「キャプチャ開始」ボタンクリック
+2.  **`toggle_capture_mode()`**:
+    -   エリアが選択済みか、自動クリック設定が妥当かなどを検証します。
+    -   検証OKならモードを開始し、フックをインストールして `capturing_overlay` を表示します。
+3.  **[マウスフック]** ユーザーが画面を左クリック
+4.  **`low_level_mouse_proc` (in `mouse.rs`)**:
+    -   **自動クリック有効時**: `auto_clicker.start()` を呼び出します。`auto_clicker` は内部ループで `perform_mouse_click` を実行し、それが再度このマウスフックに捕捉され、結果的に `capture_screen_area_with_counter` が繰り返し呼ばれます。
+    -   **自動クリック無効時**: `capture_screen_area_with_counter()` を一度だけ呼び出します。
+5.  **`capture_screen_area_with_counter()`**:
+    -   `BitBlt` で画面をキャプチャし、`StretchBlt` でリサイズします。
+    -   `image` クレートでJPEGにエンコードし、連番ファイル名で保存します。
+6.  **モード終了**:
+    -   ESCキー押下、または「キャプチャ開始」ボタンの再クリックで `toggle_capture_mode()` が呼ばれ、フックとオーバーレイを解放します。
+    -   自動クリック完了時も `WM_AUTO_CLICK_COMPLETE` を経由して `toggle_capture_mode()` が呼ばれます。
 
 ============================================================================
 */
@@ -57,7 +59,7 @@ use std::fs;
 use crate::hook::*;
 
 // UIユーティリティ群
-use crate::ui::bring_dialog::{bring_dialog_to_back, bring_dialog_to_front};
+use crate::ui::dialog_handlers::{bring_dialog_to_back, bring_dialog_to_front};
 use crate::ui::update_input_control_states::update_input_control_states;
 
 // アプリケーション状態管理構造体
@@ -70,50 +72,34 @@ use crate::system_utils::*;
 use crate::folder_manager::*;
 
 /**
- * キャプチャモードの開始/終了を切り替える中核制御関数
+ * キャプチャモードの開始/終了を切り替える
  *
- * 【機能説明】
- * スクリーンキャプチャモードのON/OFF切り替えを行い、必要なシステムリソース
- * （キーボードフック）の管理とUI状態の同期を実行します。エリア選択の
- * 事前確認により、ユーザビリティとエラーハンドリングを両立させています。
+ * この関数は、キャプチャモードを開始または終了するためのトグルとして機能します。
+ * モード開始前には、キャプチャエリアが選択されているか、自動クリック設定が
+ * 妥当かなどの前提条件を検証します。
  *
- * 【状態遷移フロー】
- * [キャプチャモード OFF] → エリア選択確認 → [キャプチャモード ON]
- *                      ↓
- *           エラー表示 ←── (エリア未選択 or 自動クリック設定不正)
- *                      ↓
- *      フック開始 + UI更新 ←── (エリア選択済み and 設定正常)
+ * # 状態遷移
+ * - **OFF -> ON**:
+ *   1. 前提条件（エリア選択、自動クリック設定）を検証します。
+ *   2. 検証に失敗した場合、エラーメッセージを表示して中断します。
+ *   3. `AppState` の `is_capture_mode` を `true` に設定します。
+ *   4. マウスとキーボードのフックをインストールし、`capturing_overlay` を表示します。
+ *   5. メインダイアログを最小化します。
  *
- * [キャプチャモード ON] → フック停止 + UI更新 → [キャプチャモード OFF]
+ * - **ON -> OFF**:
+ *   1. `AppState` の `is_capture_mode` を `false` に設定します。
+ *   2. フックをアンインストールし、`capturing_overlay` を非表示にします。
+ *   3. 実行中の自動クリック処理があれば停止させます。
+ *   4. メインダイアログを復元し、最前面に表示します。
  *
- * 【技術的詳細】
- * - モード切り替え：app_state.is_capture_mode フラグによる状態管理
- * - リソース管理：キーボードとマウスフックの install/uninstall
- * - エラーハンドリング：MessageBoxW による親切なユーザー通知
- * - UI同期：InvalidateRect による強制再描画でボタン状態を更新
- *
- * 【前提条件】
- * - app_state.dialog_hwnd が有効に設定されていること
- * - エリア選択時：app_state.selected_area に有効な RECT が設定済み
- *
- * 【副作用】
- * - キーボードとマウスフックの有効/無効化（システム全体への影響）
- * - 自動クリック処理中の場合、スレッドを停止させる
- * - AppState の is_capture_mode フラグ更新
- * - UI キャプチャボタンの表示状態変更
- * - コンソール出力によるデバッグ情報提供
- *
- * 【AIおよび第三者解析用の技術ノート】
- * この関数は ユーザビリティとシステム安全性のバランスを重視した設計です。
- * エラー処理では技術的なメッセージではなく、具体的な操作手順を提示し、
- * 初心者でも迷うことなく正しい操作を実行できるよう配慮されています。
+ * どちらの場合でも、最後に `update_input_control_states` を呼び出してUIの状態を更新します。
  */
 pub fn toggle_capture_mode() {
     let app_state = AppState::get_app_state_mut();
     let is_capture_mode = app_state.is_capture_mode;
 
     if is_capture_mode {
-        // 【キャプチャモード終了処理】
+        // キャプチャモードを終了する
         app_state.is_capture_mode = false;
 
         // キーボードとマウスフック停止
@@ -123,19 +109,17 @@ pub fn toggle_capture_mode() {
         if let Some(overlay) = app_state.capturing_overlay.as_mut() {
             overlay.hide_overlay();
         }
-        //hide_tooltip_overlay();
 
         // メインダイアログを最前面に表示
         bring_dialog_to_front();
 
-        // キャプチャモード終了時に、自動クリック処理待機＆停止
-        // WM_AUTO_CLICK_COMPLETE時も、これ呼ばれる。take()でthread_handleを開放する必要があるため
+        // 実行中の自動クリック処理があれば停止させる
         if app_state.auto_clicker.is_running() {
             app_state.auto_clicker.stop();
         }
         app_log("画面キャプチャモードを終了しました");
     } else {
-        // 【キャプチャモード開始前の前提条件チェック】
+        // キャプチャモードを開始する（開始前に前提条件をチェック）
         let has_area = app_state.selected_area.is_some();
 
         if !has_area {
@@ -148,7 +132,7 @@ pub fn toggle_capture_mode() {
                 "エラー - エリア未選択",
                 MB_OK | MB_ICONWARNING,
             );
-            return; // エラー時は早期リターンで後続処理をスキップ
+            return;
         }
 
         // 回数の値が0の場合、自動クリック機能を無効化
@@ -158,10 +142,10 @@ pub fn toggle_capture_mode() {
                 "自動クリックエラー",
                 MB_OK | MB_ICONWARNING,
             );
-            return; // エラー時は早期リターンで後続処理をスキップ
+            return;
         }
 
-        // 【キャプチャモード開始処理】
+        // 前提条件をクリアしたので、モードを開始
         app_state.is_capture_mode = true;
 
         // キーボードとマウスフック開始
@@ -171,7 +155,7 @@ pub fn toggle_capture_mode() {
         if let Some(overlay) = app_state.capturing_overlay.as_mut() {
             if let Err(e) = overlay.show_overlay() {
                 eprintln!("❌ キャプチャモードオーバーレイの表示に失敗: {:?}", e);
-                // エラー時はモードを開始せずに終了する
+                // TODO: エラー時はモードを開始せずに終了するべき
             }
         }
 
@@ -179,64 +163,32 @@ pub fn toggle_capture_mode() {
         bring_dialog_to_back();
 
         app_log("画面キャプチャモードを開始しました (エスケープキーでキャプチャ終了)");
-
-        // デバッグ用：選択エリア情報の出力
-        // let rect = app_state.selected_area.unwrap();
-        // app_log(&format!(
-        //         "選択エリア: ({}, {}) - ({}, {})",
-        //         rect.left, rect.top, rect.right, rect.bottom
-        //     )
-        // );
     };
-    // 【UI同期処理】キャプチャボタンの視覚状態を強制更新
-    update_input_control_states(); // ダイアログボタン状態更新（UI整合性確保）
+    // UIコントロールの状態を更新
+    update_input_control_states();
 }
 
 /**
- * 連番ファイル名を使用したスクリーンキャプチャ実行関数
+ * 選択された画面領域をキャプチャし、連番ファイル名でJPEGとして保存する
  *
- * 【機能説明】
- * 指定された画面矩形領域をキャプチャし、最適化されたJPEG画像として保存します。
- * ユーザー設定スケーリング、高品質アンチエイリアシング、自動連番ファイル名生成により、
- * 高速かつ軽量なスクリーンキャプチャを実現します。
- *
- * 【パフォーマンス最適化戦略】
- * 1. ユーザー設定スケーリング：ファイルサイズ削減（55%-100%可変）
- * 2. HALFTONE モード：高品質な縮小処理で視覚品質維持
- * 3. メモリDC使用：GPU加速による高速ピクセル処理
- * 4. 適切なリソース管理：メモリリーク防止とパフォーマンス最適化
- *
- * 【パラメータ】
- * left, top, right, bottom: スクリーン座標系での矩形領域（絶対座標）
+ * # パフォーマンス最適化
+ * - `BitBlt` APIによる高速なピクセルデータコピー。
+ * - `StretchBlt` APIと `HALFTONE` モードによる高品質な画像縮小。
+ * - メモリDC（オフスクリーンバッファ）を使用し、GPUアクセラレーションを活用。
  *
  * 【戻り値】
- * Result<(), Box<dyn std::error::Error>>: 成功時OK、失敗時詳細エラー情報
+ * * `Ok(())` - 成功した場合。
+ * * `Err(Box<dyn std::error::Error>)` - 失敗した場合、エラー情報。
  *
  * 【処理フロー】
- * 画面DC取得 → メモリDC作成 → 領域コピー → スケーリング処理
- *     ↓
- * ピクセルデータ抽出 → BGR→RGB変換 → JPEG圧縮 → ファイル保存
- *     ↓
- * リソース解放 → 連番カウンタ更新 → 完了通知
- *
- * 【ファイル命名規則】
- * 0001.jpg, 0002.jpg, ... (4桁ゼロパディング連番)
- *
- * 【保存先決定ロジック】
- * 1. ユーザー指定フォルダー（app_state.selected_folder_path）
- * 2. 自動検出フォルダー（get_pictures_folder()）
- * 3. フォルダー自動作成（存在しない場合）
- *
- * 【エラーハンドリング】
- * - ビットマップ作成失敗
- * - ピクセルデータ取得失敗  
- * - ファイル保存失敗
- * - フォルダー作成失敗
- *
- * 【AIおよび第三者解析用の技術ノート】
- * この関数は Windows GDI APIの複雑さを抽象化し、安全なRustコードで
- * 高性能なスクリーンキャプチャを実現しています。メモリ管理、エラー処理、
- * パフォーマンス最適化の全てを考慮した包括的な実装です。
+ * 1. `AppState` から選択領域 (`selected_area`) を取得します。
+ * 2. `GetDC` で画面全体のデバイスコンテキストを取得し、`CreateCompatibleDC` でメモリDCを作成します。
+ * 3. `BitBlt` を使用して、画面の指定領域をメモリ上のビットマップにコピーします。
+ * 4. `StretchBlt` を使用して、ユーザー設定のスケールに合わせて画像をリサイズします。
+ * 5. `GetDIBits` でリサイズされたビットマップからピクセルデータを抽出します。
+ * 6. 抽出したBGR形式のピクセルデータをRGB形式に変換し、`image` クレートの `ImageBuffer` に格納します。
+ * 7. `JpegEncoder` を使用して、ユーザー設定の品質でJPEGにエンコードし、連番ファイル名で保存します。
+ * 8. 使用したGDIリソースを全て解放します。
  */
 
 pub fn capture_screen_area_with_counter() -> Result<(), Box<dyn std::error::Error>> {
@@ -263,27 +215,27 @@ pub fn capture_screen_area_with_counter() -> Result<(), Box<dyn std::error::Erro
             }
         }
 
-        // 🔧 追加：キャプチャ処理開始時にアイコンを処理中に切り替え
+        // キャプチャ処理開始時にオーバーレイアイコンを「処理中」に切り替え
         switch_capture_processing(true);
 
-        // 【Step 1】デバイスコンテキストの準備
-        let screen_dc = GetDC(None); // 画面全体のデバイスコンテキスト取得
-        let memory_dc = CreateCompatibleDC(Some(screen_dc)); // メモリ描画用DC作成
+        // デバイスコンテキストの準備
+        let screen_dc = GetDC(None);
+        let memory_dc = CreateCompatibleDC(Some(screen_dc));
 
-        // 【Step 2】キャプチャ領域サイズ計算
+        // キャプチャ領域のサイズ計算
         let width = (right - left).abs();
         let height = (bottom - top).abs();
 
-        // 【Step 3】高品質設定：ユーザー設定のスケール値を使用
-        let scale_factor = (app_state.capture_scale_factor as f32) / 100.0; // パーセンテージから小数値に変換
+        // ユーザー設定のスケール値に基づいて、リサイズ後のサイズを計算
+        let scale_factor = (app_state.capture_scale_factor as f32) / 100.0;
         let scaled_width = ((width as f32) * scale_factor) as i32;
         let scaled_height = ((height as f32) * scale_factor) as i32;
 
-        // 【Step 4】原寸ビットマップの作成と画面コピー
+        // 原寸サイズのビットマップを作成し、画面の指定領域をコピー
         let hbitmap = CreateCompatibleBitmap(screen_dc, width, height);
         let old_bitmap = SelectObject(memory_dc, hbitmap.into());
 
-        // 画面の指定領域をメモリビットマップに高速コピー
+        // キャプチャの瞬間だけオーバーレイを非表示にし、BitBltを実行後、再表示する
         if let Some(overlay) = app_state.capturing_overlay.as_mut() {
             overlay.hide_overlay(); // キャプチャアイコンを一時的に非表示
 
@@ -299,37 +251,36 @@ pub fn capture_screen_area_with_counter() -> Result<(), Box<dyn std::error::Erro
                 SRCCOPY, // コピーモード（上書き）
             );
 
-            // キャプチャアイコン　表示状態に戻す
             if let Err(e) = overlay.show_overlay() { 
                 return Err(format!("❌ キャプチャアイコンの再表示に失敗: {}", e).into());
             }
         }
 
-        // 【Step 5】スケーリング用デバイスコンテキストとビットマップの準備
+        // スケーリング用のデバイスコンテキストとビットマップを準備
         let scaled_dc = CreateCompatibleDC(Some(screen_dc));
         let hbitmap_scaled = CreateCompatibleBitmap(screen_dc, scaled_width, scaled_height);
         let old_bitmap_scaled = SelectObject(scaled_dc, hbitmap_scaled.into());
 
-        // 【Step 6】高品質スケーリングモードの設定
-        let _ = SetStretchBltMode(scaled_dc, HALFTONE); // アンチエイリアシング有効
-        let _ = SetBrushOrgEx(scaled_dc, 0, 0, None); // ブラシ原点設定
+        // 高品質な縮小処理を行うためにHALFTONEモードを設定
+        let _ = SetStretchBltMode(scaled_dc, HALFTONE);
+        let _ = SetBrushOrgEx(scaled_dc, 0, 0, None);
 
-        // 【Step 7】高品質縮小処理の実行
+        // `StretchBlt` を使用して、原寸ビットマップを縮小ビットマップにコピー
         let _ = StretchBlt(
-            scaled_dc, // 縮小先DC
+            scaled_dc,
             0,
-            0, // 縮小先座標
+            0,
             scaled_width,
-            scaled_height,   // 縮小後サイズ
-            Some(memory_dc), // 縮小元DC
+            scaled_height,
+            Some(memory_dc),
             0,
-            0, // 縮小元座標
+            0,
             width,
             height,  // 縮小元サイズ
             SRCCOPY, // 転送モード
         );
 
-        // 【Step 8】ピクセルデータ抽出の準備
+        // ピクセルデータ抽出の準備
         let bytes_per_pixel = 3; // RGB 24bit形式
         let row_size = ((scaled_width * bytes_per_pixel + 3) / 4) * 4; // Windows 4バイト境界調整
         let mut pixel_data = vec![0u8; (row_size * scaled_height) as usize];
@@ -352,7 +303,7 @@ pub fn capture_screen_area_with_counter() -> Result<(), Box<dyn std::error::Erro
             bmiColors: [RGBQUAD::default(); 1], // RGB形式では未使用
         };
 
-        // 【Step 9】ビットマップからピクセルデータを抽出
+        // `GetDIBits` を使用して、縮小ビットマップからピクセルデータを抽出
         let result = GetDIBits(
             scaled_dc,                               // ソースDC
             hbitmap_scaled,                          // ソースビットマップ
@@ -363,7 +314,7 @@ pub fn capture_screen_area_with_counter() -> Result<(), Box<dyn std::error::Erro
             DIB_RGB_COLORS,                          // カラーテーブル形式
         );
 
-        // 【Step 10】Windows GDI リソースの適切な解放（メモリリーク防止）
+        // Windows GDIリソースを解放
         let _ = SelectObject(memory_dc, old_bitmap); // 元のビットマップを復元
         let _ = SelectObject(scaled_dc, old_bitmap_scaled); // 元のビットマップを復元
         let _ = DeleteObject(hbitmap.into()); // 原寸ビットマップ削除
@@ -379,11 +330,11 @@ pub fn capture_screen_area_with_counter() -> Result<(), Box<dyn std::error::Erro
             return Err("ビットマップデータの取得に失敗".into());
         }
 
-        // 【Step 11】image crate用ImageBufferの作成とピクセル変換
+        // `image` クレート用の `ImageBuffer` を作成し、ピクセルデータを変換
         let mut img_buffer =
             ImageBuffer::<Rgb<u8>, Vec<u8>>::new(scaled_width as u32, scaled_height as u32);
 
-        // ピクセル単位でのBGR→RGB変換処理
+        // Windows GDIのBGR形式から、標準的なRGB形式にピクセル単位で変換
         for y in 0..scaled_height {
             for x in 0..scaled_width {
                 let src_idx = (y * row_size + x * bytes_per_pixel) as usize;
@@ -400,7 +351,7 @@ pub fn capture_screen_area_with_counter() -> Result<(), Box<dyn std::error::Erro
             }
         }
 
-        // 【Step 12】保存先ディレクトリの決定（フォールバック戦略）
+        // 保存先ディレクトリを決定
         let save_dir_path: String = {
             if let Some(selected_path) = app_state.selected_folder_path.as_ref() {
                 selected_path.clone() // ユーザー指定フォルダー優先
@@ -409,18 +360,17 @@ pub fn capture_screen_area_with_counter() -> Result<(), Box<dyn std::error::Erro
             }
         };
 
-        // フォルダー存在確認と自動作成
+        // フォルダが存在しない場合は作成
         let save_dir = std::path::Path::new(&save_dir_path);
         if !save_dir.exists() {
             fs::create_dir_all(save_dir)?; // 親ディレクトリも含めて再帰作成
         }
 
-        // 【Step 13】連番ファイル名生成（4桁ゼロパディング）
+        // 連番ファイル名を生成（4桁ゼロパディング）
         let current_counter = app_state.capture_file_counter;
         let file_path = save_dir.join(format!("{:04}.jpg", current_counter));
 
-        // 【Step 14】JPEG保存
-        // 🔧 修正：最高品質でJPEG保存（エラー時カーソル復元対応）
+        // JPEGとして保存
         use image::codecs::jpeg::JpegEncoder;
         use std::fs::File;
         use std::io::BufWriter;
@@ -428,7 +378,7 @@ pub fn capture_screen_area_with_counter() -> Result<(), Box<dyn std::error::Erro
         let save_result = (|| -> Result<(), Box<dyn std::error::Error>> {
             let output_file = File::create(&file_path)?;
             let mut writer = BufWriter::new(output_file);
-            let encoder = JpegEncoder::new_with_quality(&mut writer, app_state.jpeg_quality); // ユーザー設定品質
+            let encoder = JpegEncoder::new_with_quality(&mut writer, app_state.jpeg_quality);
             img_buffer.write_with_encoder(encoder)?;
             Ok(())
         })();
@@ -445,7 +395,7 @@ pub fn capture_screen_area_with_counter() -> Result<(), Box<dyn std::error::Erro
                     app_state.jpeg_quality
                 ));
 
-                // 【Step 15】成功時のみ連番カウンタをインクリメント（失敗時は番号スキップを防止）
+                // 成功時のみ連番カウンタをインクリメント
                 app_state.capture_file_counter += 1;
 
                 // 処理成功時にアイコンを待機中に戻す
@@ -463,23 +413,17 @@ pub fn capture_screen_area_with_counter() -> Result<(), Box<dyn std::error::Erro
 }
 
 /**
- * 🔄 キャプチャオーバーレイの状態切り替え関数
+ * キャプチャオーバーレイの表示状態（待機中/処理中）を切り替える
  *
- * 【機能概要】
- * キャプチャ処理の状態（待機中/処理中）を`AppState`に保存し、
- * `capturing_overlay`に再描画を要求することで、表示を更新する。
+ * `AppState` のフラグを更新し、`capturing_overlay` に再描画を要求することで、
+ * マウスカーソルに追従するアイコンの表示を「待機中」と「処理中」で切り替えます。
  *
- * 【技術実装】
- * - 状態保存: `app_state.capture_overlay_is_processing` フラグ更新
- * - UI更新: `overlay.refresh_overlay()` を呼び出してオーバーレイを再描画
+ * # 引数
+ * * `is_processing` - `true` であれば「処理中」アイコン、`false` であれば「待機中」アイコンを表示します。
  *
- * 【状態遷移】
- * - is_processing=false（待機中）: 待機中アイコンが表示される
- * - is_processing=true（処理中）: 処理中アイコンが表示される
- *
- * 【呼び出しコンテキスト】
- * - キャプチャ処理開始直前: `switch_capture_processing(true)`
- * - キャプチャ処理完了後: `switch_capture_processing(false)`
+ * # 呼び出し箇所
+ * - `capture_screen_area_with_counter` の処理開始時に `true` で呼び出されます。
+ * - `capture_screen_area_with_counter` の処理終了時に `false` で呼び出されます。
  */
 pub fn switch_capture_processing(is_processing: bool) {
     let app_state = AppState::get_app_state_mut();
