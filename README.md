@@ -113,8 +113,11 @@
 - **UIフレームワーク**: Win32 API (ネイティブ)
 - **描画エンジン**: GDI+ (ハードウェアアクセラレーションによる高速な透過描画)
 - **イベント処理**: 低レベルシステムフック (`WH_MOUSE_LL`, `WH_KEYBOARD_LL`)
-- **画像処理**: `image` クレート
-- **PDF生成**: `lopdf` クレート
+- **画像処理**: [image](https://crates.io/crates/image) クレート
+- **PDF生成**: [lopdf](https://crates.io/crates/lopdf) クレート
+- **その他のクレート**：
+ - [once_cell](https://crates.io/crates/once_cell)
+ - [num-format ](https://crates.io/crates/num-format)
 
 ---
 
