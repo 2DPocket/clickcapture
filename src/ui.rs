@@ -48,3 +48,6 @@ pub mod initialize_controls;
 pub mod input_control_handlers;
 
 pub mod ui_utils;
+
+pub mod folder_manager;
+

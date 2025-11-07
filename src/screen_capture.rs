@@ -69,7 +69,7 @@ use crate::{app_state::*, overlay::Overlay};
 use crate::system_utils::*;
 
 // フォルダー管理機能
-use crate::folder_manager::*;
+use crate::ui::folder_manager::*;
 
 /**
  * キャプチャモードの開始/終了を切り替える

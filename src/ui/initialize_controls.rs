@@ -49,7 +49,7 @@ use windows::{
 use crate::app_state::*;
 
 // フォルダ管理機能
-use crate::folder_manager::get_pictures_folder;
+use crate::ui::folder_manager::get_pictures_folder;
 
 // 定数群インポート
 use crate::constants::*;
