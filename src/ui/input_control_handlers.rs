@@ -17,6 +17,15 @@ UIコントロールイベントハンドラ (input_control_handlers.rs)
     -   画像スケール、JPEG品質、PDF最大サイズなどのコンボボックスの選択内容を `AppState` に反映させます。
 3.  **自動クリック関連のUI処理**:
     -   自動クリックの有効/無効チェックボックス、間隔、回数の設定を `AppState` に同期させます。
+4.  **`update_input_control_states`**:
+    -   `AppState` から現在のモードフラグ（`is_area_select_mode`, `is_capture_mode`など）を読み取ります。
+    -   モードに応じて、各UIコントロールが有効であるべきか無効であるべきかを決定します。
+    -   `EnableWindow` API を使用して、各コントロールの状態を実際に変更します。
+    -   ユーザーが状況に応じて適切な操作のみを行えるようにUIを動的に制御します。
+5.  **`update_auto_click_controls_state`**:
+    -   自動クリック機能に関連するコントロール（間隔コンボボックス、回数エディットボックス）の
+        有効/無効状態を、自動クリックチェックボックスの状態に同期させます。
+
 
 【AI解析用：依存関係】
 - `main.rs`: `dialog_proc` 内の `WM_COMMAND` メッセージハンドラからこのモジュールの関数を呼び出す。
@@ -27,302 +36,144 @@ UIコントロールイベントハンドラ (input_control_handlers.rs)
  */
 
 // 必要なライブラリ（外部機能）をインポート
-use windows::
-    Win32::{
-        Foundation::{HWND, LPARAM, WPARAM}, // 基本的なデータ型
-        UI::{
-            Controls::{
-                BST_CHECKED, IsDlgButtonChecked,
-            },
-            WindowsAndMessaging::*, // ウィンドウとメッセージ処理
-        },
-    } // Windows API用の文字列操作
-;
+use windows::Win32::{
+    Foundation::HWND,
+    Graphics::Gdi::{InvalidateRect, UpdateWindow},
+    UI::{Input::KeyboardAndMouse::EnableWindow, WindowsAndMessaging::*},
+};
 
-// アプリケーション状態管理構造体
-use crate::app_state::AppState;
+use crate::{
+    app_state::AppState, constants::*,
+    ui::auto_click_checkbox_handler::update_auto_click_controls_state,
+};
 
-// 定数群インポート
-use crate::constants::*;
-
-// PDF変換機能インポート
-use crate::export_pdf::export_selected_folder_to_pdf;
-
-// UI更新機能インポート
-use crate::ui::update_input_control_states::update_input_control_states;
-use crate::ui::update_input_control_states::update_auto_click_controls_state;
-
-// 
-use crate::system_utils::*;
-
-
-
-
-/// PDF変換ボタンのクリックイベントを処理する
+/// オーナードローボタンの初期化
 ///
-/// ユーザーに確認ダイアログを表示し、同意が得られた場合にJPEGからPDFへの変換プロセスを開始します。
-/// 処理中は、他のUI操作を無効化し、マウスカーソルを砂時計に変更して処理中であることを示します。
+/// すべてのオーナードローボタン（アイコンボタン）に対して、
+/// マウスカーソルが乗ったときに標準の矢印カーソルから手のひらカーソルに
+/// 変わるように設定します。これにより、クリック可能であることが視覚的に分かりやすくなります。
 ///
-/// # 処理フロー
-/// 1. `show_message_box` でユーザーに実行の意思を確認します。
-/// 2. ユーザーが「OK」をクリックした場合:
-///    a. `AppState` の `is_exporting_to_pdf` フラグを `true` に設定し、UIコントロールを無効化します。
-///    b. マウスカーソルを砂時計（`IDC_WAIT`）に変更します。
-///    c. `export_selected_folder_to_pdf` を呼び出して変換処理を実行します。
-///    d. 処理完了後、カーソルを元に戻し、`is_exporting_to_pdf` フラグを `false` にしてUIを再度有効化します。
-///    e. 処理結果（成功または失敗）をメッセージボックスでユーザーに通知します。
-/// 3. ユーザーが「キャンセル」をクリックした場合は、ログを出力して処理を中断します。
-pub fn handle_pdf_export_button() -> isize {
+/// # 引数
+/// * `hwnd` - メインダイアログのウィンドウハンドル。
+///
+/// # 処理内容
+/// 1. `LoadCursorW` で `IDC_HAND`（手のひら）カーソルを読み込みます。
+/// 2. `GetDlgItem` で各ボタンのハンドルを取得します。
+/// 3. `SetClassLongPtrW` を使用して、各ボタンのウィンドウクラスに `GCLP_HCURSOR` を設定します。
+pub fn initialize_icon_button(hwnd: HWND) {
     unsafe {
-        // 確認ダイアログを表示
-        let result = show_message_box(
-            "PDF変換を開始してもよろしいでしょうか？\n\n選択されたフォルダー内のJPEG画像を\nPDFファイルに変換します。",
-            "PDF変換確認",
-            MB_OKCANCEL | MB_ICONQUESTION,
-        );
+        // 手のひらカーソルを読み込み
+        let hand_cursor = LoadCursorW(None, IDC_HAND).unwrap_or_default();
 
-        if result.0 == IDOK.0 {
-            app_log("PDF変換を開始します...");
-
-            // カーソルを砂時計に変更
-            let wait_cursor = LoadCursorW(None, IDC_WAIT).unwrap_or_default();
-            let original_cursor = SetCursor(Some(wait_cursor));
-
-            // PDF変換実行（RAIIパターンでカーソー復元を保証）
-            let conversion_result = {
-                let app_state = AppState::get_app_state_mut();
-
-                app_state.is_exporting_to_pdf = true;
-                update_input_control_states();
-                let result = export_selected_folder_to_pdf();
-                app_state.is_exporting_to_pdf = false;
-                update_input_control_states();
-                SetCursor(Some(original_cursor));
-                result
-            };
-
-            // 結果処理
-            match conversion_result {
-                Err(e) => {
-                    app_log(&format!("PDF変換エラー: {}", e));
-                    let error_message = format!("PDF変換中にエラーが発生しました：\n\n{}", e);
-                    show_message_box(&error_message, "PDF変換エラー", MB_OK | MB_ICONERROR);
-                }
-                Ok(_) => {
-                    show_message_box(
-                        "PDF変換が正常に完了しました。",
-                        "PDF変換完了",
-                        MB_OK | MB_ICONINFORMATION,
-                    );
-                }
-            }
-        } else {
-            app_log("PDF変換がキャンセルされました。");
+        // 各アイコンボタンにカスタムカーソルを設定
+        if let Ok(button) = GetDlgItem(Some(hwnd), IDC_CAPTURE_START_BUTTON) {
+            let _ = InvalidateRect(Some(button), None, true);
+            let _ = SetClassLongPtrW(button, GET_CLASS_LONG_INDEX(-12), hand_cursor.0 as isize);
         }
-    }
-    1
-}
-
-/// 画像スケールコンボボックスの選択変更を処理する
-///
-/// # 引数
-/// * `hwnd` - ダイアログウィンドウハンドル
-///
-/// # 処理内容
-/// 1. `CB_GETCURSEL` で選択された項目のインデックスを取得します。
-/// 2. `CB_GETITEMDATA` でその項目に関連付けられたスケール値（`u8`）を取得します。
-/// 3. 取得した値を `AppState` の `capture_scale_factor` フィールドに保存します。
-pub fn handle_scale_combo_change(hwnd: HWND) {
-    if let Ok(combo_hwnd) = unsafe { GetDlgItem(Some(hwnd), IDC_SCALE_COMBO) } {
-        // 現在選択されているインデックスを取得
-        let selected_index =
-            unsafe { SendMessageW(combo_hwnd, CB_GETCURSEL, Some(WPARAM(0)), Some(LPARAM(0))).0 }
-                as i32;
-
-        if selected_index >= 0 {
-            // 選択された項目のデータを直接取得
-            let scale_value = unsafe {
-                SendMessageW(
-                    combo_hwnd,
-                    CB_GETITEMDATA,
-                    Some(WPARAM(selected_index as usize)),
-                    Some(LPARAM(0)),
-                )
-            }
-            .0 as u8;
-
-            // AppStateに保存
-            let app_state = AppState::get_app_state_mut();
-            app_state.capture_scale_factor = scale_value as u8;
-
-            println!("スケール設定変更: {}%", scale_value);
+        if let Ok(button) = GetDlgItem(Some(hwnd), IDC_AREA_SELECT_BUTTON) {
+            let _ = InvalidateRect(Some(button), None, true);
+            let _ = SetClassLongPtrW(button, GET_CLASS_LONG_INDEX(-12), hand_cursor.0 as isize);
+        }
+        if let Ok(button) = GetDlgItem(Some(hwnd), IDC_BROWSE_BUTTON) {
+            let _ = InvalidateRect(Some(button), None, true);
+            let _ = SetClassLongPtrW(button, GET_CLASS_LONG_INDEX(-12), hand_cursor.0 as isize);
+        }
+        if let Ok(button) = GetDlgItem(Some(hwnd), IDC_CLOSE_BUTTON) {
+            let _ = InvalidateRect(Some(button), None, true);
+            let _ = SetClassLongPtrW(button, GET_CLASS_LONG_INDEX(-12), hand_cursor.0 as isize);
+        }
+        if let Ok(button) = GetDlgItem(Some(hwnd), IDC_EXPORT_PDF_BUTTON) {
+            let _ = InvalidateRect(Some(button), None, true);
+            let _ = SetClassLongPtrW(button, GET_CLASS_LONG_INDEX(-12), hand_cursor.0 as isize);
         }
     }
 }
 
-/// JPEG品質コンボボックスの選択変更を処理する
+/// アプリケーションのモードに応じて、全てのUIコントロールの有効/無効状態を更新する
 ///
-/// # 引数
-/// * `hwnd` - ダイアログウィンドウハンドル
+/// # モード別の状態
+/// - **通常モード**: ほとんどのコントロールが有効になります。
+/// - **エリア選択モード**: 「エリア選択」ボタン（キャンセルとして機能）と「閉じる」ボタンのみ有効になります。
+/// - **キャプチャモード**: 「キャプチャ開始」ボタン（キャンセルとして機能）と「閉じる」ボタンのみ有効になります。
+/// - **PDF変換中**: 全てのコントロールが無効になり、処理に集中させます。
 ///
-/// # 処理内容
-/// 1. `CB_GETCURSEL` で選択された項目のインデックスを取得します。
-/// 2. `CB_GETITEMDATA` でその項目に関連付けられた品質値（`u8`）を取得します。
-/// 3. 取得した値を `AppState` の `jpeg_quality` フィールドに保存します。
-pub fn handle_quality_combo_change(hwnd: HWND) {
-    if let Ok(combo_hwnd) = unsafe { GetDlgItem(Some(hwnd), IDC_QUALITY_COMBO) } {
-        // 現在選択されているインデックスを取得
-        let selected_index =
-            unsafe { SendMessageW(combo_hwnd, CB_GETCURSEL, Some(WPARAM(0)), Some(LPARAM(0))).0 }
-                as i32;
+/// # 呼び出しタイミング
+/// モードが変更されるたびに呼び出され、UIの状態をアプリケーションの内部状態と同期させます。
+/// 例えば、エリア選択モードの開始/終了時や、キャプチャモードの開始/終了時などです。
+pub fn update_input_control_states() {
+    let app_state = AppState::get_app_state_ref();
 
-        if selected_index >= 0 {
-            // 選択された項目のデータを直接取得
-            let quality_value = unsafe {
-                SendMessageW(
-                    combo_hwnd,
-                    CB_GETITEMDATA,
-                    Some(WPARAM(selected_index as usize)),
-                    Some(LPARAM(0)),
-                )
+    // ダイアログハンドルを取得
+    let hwnd = match app_state.dialog_hwnd {
+        Some(safe_hwnd) => *safe_hwnd,
+        None => return, // ダイアログが初期化されていない場合は何もしない
+    };
+
+    // モード判定とボタン状態決定
+    let (
+        area_select_enable,
+        capture_enable,
+        browse_enable,
+        export_pdf_enable,
+        close_enable,
+        auto_click_enable,
+        property_combobox_enable,
+    ) = if app_state.is_area_select_mode {
+        // エリア選択モード中：「エリア選択」ボタン（キャンセル用）と「閉じる」ボタンのみ有効
+        (true, false, false, false, true, false, false)
+    } else if app_state.is_capture_mode {
+        // キャプチャモード中：「キャプチャ開始」ボタン（キャンセル用）と「閉じる」ボタンのみ有効
+        (false, true, false, false, true, false, false)
+    } else if app_state.is_exporting_to_pdf {
+        // PDF変換中：全てのコントロールを無効化
+        (false, false, false, false, false, false, false)
+    } else {
+        // 通常モード：エリア選択済みならキャプチャ表示、他は全て表示
+        (true, true, true, true, true, true, true)
+    };
+
+    // ボタン表示制御関数
+    fn set_input_control_status(hwnd: HWND, control_id: i32, enabled: bool) {
+        unsafe {
+            if let Ok(button) = GetDlgItem(Some(hwnd), control_id) {
+                let _ = EnableWindow(button, enabled);
+                // InvalidateRectはオーナードローボタンには有効だが、標準コントロールの
+                // グレーアウト状態を即座に反映させるにはUpdateWindowで強制的に再描画を促すのが確実。
+                let _ = InvalidateRect(Some(button), None, true); // オーナードローボタンのために残す
+                let _ = UpdateWindow(button); // 標準コントロールのために追加
             }
-            .0 as u8;
-
-            // AppStateに保存
-            let app_state = AppState::get_app_state_mut();
-            app_state.jpeg_quality = quality_value as u8;
-
-            println!("JPEG品質設定変更: {}%", quality_value);
         }
     }
-}
 
-/// PDF最大サイズコンボボックスの選択変更を処理する
-///
-/// # 引数
-/// * `hwnd` - ダイアログウィンドウハンドル
-///
-/// # 処理内容
-/// 1. `CB_GETCURSEL` で選択された項目のインデックスを取得します。
-/// 2. `CB_GETITEMDATA` でその項目に関連付けられたサイズ値（`u16`, MB単位）を取得します。
-/// 3. 取得した値を `AppState` の `pdf_max_size_mb` フィールドに保存します。
-pub fn handle_pdf_size_combo_change(hwnd: HWND) {
-    if let Ok(combo_hwnd) = unsafe { GetDlgItem(Some(hwnd), IDC_PDF_SIZE_COMBO) } {
-        // 現在選択されているインデックスを取得
-        let selected_index =
-            unsafe { SendMessageW(combo_hwnd, CB_GETCURSEL, Some(WPARAM(0)), Some(LPARAM(0))).0 }
-                as i32;
+    // 各ボタンの表示制御
+    set_input_control_status(hwnd, IDC_AREA_SELECT_BUTTON, area_select_enable);
+    set_input_control_status(hwnd, IDC_CAPTURE_START_BUTTON, capture_enable);
+    set_input_control_status(hwnd, IDC_BROWSE_BUTTON, browse_enable);
+    set_input_control_status(hwnd, IDC_EXPORT_PDF_BUTTON, export_pdf_enable);
+    set_input_control_status(hwnd, IDC_CLOSE_BUTTON, close_enable);
+    set_input_control_status(hwnd, IDC_AUTO_CLICK_CHECKBOX, auto_click_enable);
 
-        if selected_index >= 0 {
-            // 選択された項目のデータを直接取得
-            let size_value = unsafe {
-                SendMessageW(
-                    combo_hwnd,
-                    CB_GETITEMDATA,
-                    Some(WPARAM(selected_index as usize)),
-                    Some(LPARAM(0)),
-                )
-            }
-            .0 as u16;
+    // プロパティコンボボックス群の有効/無効制御
+    set_input_control_status(hwnd, IDC_SCALE_COMBO, property_combobox_enable);
+    set_input_control_status(hwnd, IDC_QUALITY_COMBO, property_combobox_enable);
+    set_input_control_status(hwnd, IDC_PDF_SIZE_COMBO, property_combobox_enable);
 
-            // AppStateに保存
-            let app_state = AppState::get_app_state_mut();
-            app_state.pdf_max_size_mb = size_value as u16;
-
-            println!("PDFサイズ設定変更: {}MB", size_value);
-        }
-    }
-}
-
-
-/// 自動連続クリックチェックボックスの状態変更を処理する
-///
-/// # 引数
-/// * `hwnd` - ダイアログウィンドウハンドル
-///
-/// # 処理内容
-/// 1. `IsDlgButtonChecked` でチェックボックスの状態を取得します。
-/// 2. `AppState` の `auto_clicker` の有効状態を更新します。
-/// 3. `update_auto_click_controls_state` を呼び出し、関連するUIコントロール（間隔コンボボックス、回数エディットボックス）の有効/無効状態を同期させます。
-pub fn handle_auto_click_checkbox_change(hwnd: HWND) {
-    unsafe {
-        // チェックボックスの状態を取得
-        let is_checked = IsDlgButtonChecked(hwnd, IDC_AUTO_CLICK_CHECKBOX) == BST_CHECKED.0;
-
-        // AppStateに保存
-        let app_state = AppState::get_app_state_mut();
-
-        if is_checked {
-            app_state.auto_clicker.set_enabled(true);
-            println!("✅連続クリックが有効になりました");
-        } else {
-            app_state.auto_clicker.set_enabled(false);
-            println!("☐ 続クリックが無効になりました");
-        }
-
+    // 自動クリックの設定が有効な場合、関連コントロールを有効化
+    if auto_click_enable {
         update_auto_click_controls_state(hwnd);
+    } else {
+        set_input_control_status(hwnd, IDC_AUTO_CLICK_INTERVAL_COMBO, false);
+        set_input_control_status(hwnd, IDC_AUTO_CLICK_COUNT_EDIT, false);
     }
-}
 
-/// 自動クリック間隔コンボボックスの選択変更を処理する
-///
-/// # 引数
-/// * `hwnd` - ダイアログウィンドウハンドル
-///
-/// # 処理内容
-/// コンボボックスで選択された項目から間隔の値（ミリ秒）を取得し、`AppState` の `auto_clicker` に設定します。
-pub fn handle_auto_click_interval_combo_change(hwnd: HWND) {
-    if let Ok(combo_hwnd) = unsafe { GetDlgItem(Some(hwnd), IDC_AUTO_CLICK_INTERVAL_COMBO) } {
-        // 現在選択されているインデックスを取得
-        let selected_index =
-            unsafe { SendMessageW(combo_hwnd, CB_GETCURSEL, Some(WPARAM(0)), Some(LPARAM(0))).0 }
-                as i32;
-
-        if selected_index >= 0 {
-            // 選択された項目のデータを直接取得
-            let interval_value = unsafe {
-                SendMessageW(
-                    combo_hwnd,
-                    CB_GETITEMDATA,
-                    Some(WPARAM(selected_index as usize)),
-                    Some(LPARAM(0)),
-                )
-            }
-            .0 as u64;
-
-            // AppStateに保存
-            let app_state = AppState::get_app_state_mut();
-            app_state.auto_clicker.set_interval(interval_value);
-
-            println!("自動クリック間隔設定変更: {}ms", interval_value);
-        }
-    }
-}
-
-/// 自動クリック回数エディットボックスの変更を処理する
-///
-/// # 引数
-/// * `hwnd` - ダイアログウィンドウハンドル
-///
-/// # 処理内容
-/// エディットボックスからフォーカスが外れた（`EN_KILLFOCUS`）際に、入力されたテキストを数値に変換し、`AppState` の `auto_clicker` に最大実行回数として設定します。
-pub fn handle_auto_click_count_edit_change(hwnd: HWND) {
-    unsafe {
-        if let Ok(edit_hwnd) = GetDlgItem(Some(hwnd), IDC_AUTO_CLICK_COUNT_EDIT) {
-            // テキストを取得
-            let mut buffer: [u16; 16] = [0; 16];
-            let text_length = GetWindowTextW(edit_hwnd, &mut buffer);
-            if text_length == 0 {
-                return; // テキストが空の場合は何もしない
-            }
-
-            let text = String::from_utf16_lossy(&buffer[..text_length as usize]);
-            // 数値に変換
-            if let Ok(count) = text.trim().parse::<u32>() {
-                let app_state = AppState::get_app_state_mut();
-                app_state.auto_clicker.set_max_count(count);
-                println!("自動クリック回数設定変更: {}", count);
-            }
-        }
-    }
+    // デバッグログ出力
+    println!(
+        "ボタン表示状態更新: エリア選択={}, キャプチャ={}, 参照(フォルダー選択)={}, PDF={}, 閉じる={}, 自動クリック={}",
+        area_select_enable,
+        capture_enable,
+        browse_enable,
+        export_pdf_enable,
+        close_enable,
+        auto_click_enable
+    );
 }

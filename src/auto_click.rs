@@ -63,10 +63,10 @@ const MAX_CAPTURE_COUNT: u32 = 999; // 最大連続クリック数制限
 #[derive(Debug)]
 pub struct AutoClicker {
     enabled: bool,                                 // 機能がUI上で有効かどうかのフラグ
-    stop_flag: Arc<AtomicBool>,                    // バックグラウンドスレッドを停止させるためのフラグ
-    interval_ms: u64,                              // クリック実行間隔（ミリ秒）
-    progress_count: Arc<AtomicU32>,                // 現在の実行回数
-    max_count: Arc<AtomicU32>,                     // 設定された最大実行回数
+    stop_flag: Arc<AtomicBool>, // バックグラウンドスレッドを停止させるためのフラグ
+    interval_ms: u64,           // クリック実行間隔（ミリ秒）
+    progress_count: Arc<AtomicU32>, // 現在の実行回数
+    max_count: Arc<AtomicU32>,  // 設定された最大実行回数
     thread_handle: Option<thread::JoinHandle<()>>, // バックグラウンドスレッドのハンドル
 }
 

@@ -44,7 +44,9 @@ JPEG画像としての保存、連番ファイル名の生成、キャプチャ�
 ============================================================================
 */
 
-use windows::Win32::UI::WindowsAndMessaging::{IDOK, MB_ICONQUESTION, MB_ICONWARNING, MB_OK, MB_OKCANCEL};
+use windows::Win32::UI::WindowsAndMessaging::{
+    IDOK, MB_ICONQUESTION, MB_ICONWARNING, MB_OK, MB_OKCANCEL,
+};
 // 必要なライブラリ（外部機能）をインポート
 use windows::Win32::{
     Graphics::Gdi::*, // グラフィック描画機能
@@ -52,24 +54,19 @@ use windows::Win32::{
 // 画像処理ライブラリ（JPEGキャプチャ保存専用）
 use image::{ImageBuffer, Rgb};
 
-// ファイルシステム操作
 use std::fs;
 
-// システムフック管理モジュール
-use crate::hook::*;
-
-// UIユーティリティ群
-use crate::ui::dialog_handlers::{bring_dialog_to_back, bring_dialog_to_front};
-use crate::ui::update_input_control_states::update_input_control_states;
-
-// アプリケーション状態管理構造体
-use crate::{app_state::*, overlay::Overlay};
-
-// ユーティリティ関数
-use crate::system_utils::*;
-
-// フォルダー管理機能
-use crate::ui::folder_manager::*;
+use crate::{
+    app_state::*,
+    hook::*,
+    overlay::Overlay,
+    system_utils::*,
+    ui::{
+        dialog_handler::{bring_dialog_to_back, bring_dialog_to_front},
+        folder_manager::*,
+        input_control_handlers::update_input_control_states,
+    },
+};
 
 /**
  * キャプチャモードの開始/終了を切り替える
@@ -145,7 +142,6 @@ pub fn toggle_capture_mode() {
             return;
         }
 
-
         // 確認ダイアログを表示
         if app_state.auto_clicker.is_enabled() {
             let result = show_message_box(
@@ -165,7 +161,6 @@ pub fn toggle_capture_mode() {
                 return;
             }
         }
-
 
         // 前提条件をクリアしたので、モードを開始
         app_state.is_capture_mode = true;
@@ -273,7 +268,7 @@ pub fn capture_screen_area_with_counter() -> Result<(), Box<dyn std::error::Erro
                 SRCCOPY, // コピーモード（上書き）
             );
 
-            if let Err(e) = overlay.show_overlay() { 
+            if let Err(e) = overlay.show_overlay() {
                 return Err(format!("❌ キャプチャアイコンの再表示に失敗: {}", e).into());
             }
         }
