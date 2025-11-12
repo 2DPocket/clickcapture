@@ -135,6 +135,8 @@ use windows::{
     core::PCWSTR, // Windows API用の文字列操作
 };
 
+use color_eyre::Result;
+
 /*
 ============================================================================
 定数
@@ -211,8 +213,11 @@ use ui::dialog_handler::dialog_proc;
 アプリケーションエントリーポイント
 ============================================================================
 */
-fn main() {
+fn main() -> Result<()> {
     println!("アプリケーションを開始します...");
+
+    // color-eyre エラーハンドリングの初期化
+    color_eyre::install()?;    
 
     unsafe {
         // DPI対応を有効化
@@ -241,7 +246,7 @@ fn main() {
 
         if status != Status(0) {
             eprintln!("GdiplusStartup failed with status: {:?}", status);
-            return;
+            return Ok(());
         }
         println!("✅ GDI+ を初期化しました。");
     }
@@ -262,4 +267,5 @@ fn main() {
         GdiplusShutdown(gdiplus_token);
     }
     println!("アプリケーションを終了します。");
+    Ok(())
 }
