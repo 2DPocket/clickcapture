@@ -15,6 +15,10 @@
 
 ![clickcapture](https://github.com/user-attachments/assets/6c7445e9-d239-482e-8ecc-08b359fa64d4)
 
+自動クリック機能
+![clickcapture](https://github.com/user-attachments/assets/a04aa299-be63-41cd-83a8-6b02c060c812)
+
+
 ### デモでは、 [Microsoft 365 Copilot ユーザー向け研修資料](https://speakerdeck.com/hirotomotaguchi/copilot-for-microsoft-365-yuzaxiang-keyan-xiu-zi-liao) のスライドを使用させて頂きました。🙇‍♂️
 
 ---
